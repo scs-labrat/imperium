@@ -1,7 +1,7 @@
 # Imperium Demo
 ## Installation
 ```bash
-git clone imperium_repo
+git clone https://github.com/scs-labrat/imperium.git
 cd imperium/backend
 echo "API_KEY="gemini_api_key"
 npm install .
