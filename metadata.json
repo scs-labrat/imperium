@@ -1,0 +1,5 @@
+{
+  "name": "Imperium C2",
+  "description": "An AI-powered platform for offensive security professionals to autonomously generate, customize, and deploy code for threat emulation, penetration testing, and vulnerability research. It features an intuitive interface for defining objectives, specifying attack types, and simulating real-world threat actor techniques.",
+  "requestFramePermissions": []
+}
