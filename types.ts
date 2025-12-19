@@ -245,3 +245,9 @@ export enum PayloadType {
     VBA = "VBA",
     MSI = "MSI",
 }
+
+export interface McpConfig {
+    command: string;
+    args: string[];
+    enabled: boolean;
+}

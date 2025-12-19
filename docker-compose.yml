@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./backend/prisma:/usr/src/app/prisma
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=file:./prisma/dev.db
+      # You need to create a .env file in the backend directory with your API_KEY
+      # Example: API_KEY=your_google_ai_api_key
+    networks:
+      - imperium-net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8080:80"
+    environment:
+      - VITE_API_BASE_URL=http://backend:3001/api/v1
+      - VITE_SOCKET_URL=http://backend:3001
+    depends_on:
+      - backend
+    networks:
+      - imperium-net
+
+networks:
+  imperium-net:
+    driver: bridge

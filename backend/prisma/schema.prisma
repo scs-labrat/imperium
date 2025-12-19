@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Listener {
+  id           String @id
+  name         String
+  type         String
+  host         String
+  port         Int
+  status       String
+  redirectorId String?
+  hostHeader   String?
+}
+
+model Redirector {
+  id     String @id
+  name   String
+  type   String
+  ip     String
+  tier   String
+  status String
+}
+
+model Agent {
+  id                     String @id
+  os                     String
+  osVersion              String
+  hostname               String
+  user                   String
+  privileges             String
+  ip                     String
+  externalIp             String
+  lastSeen               DateTime
+  firstSeen              DateTime
+  status                 String
+  listener               String
+  pid                    Int
+  processName            String
+  processInjectionTarget String?
+}
+
+model Loot {
+  id         String   @id
+  agentId    String
+  type       String
+  source     String
+  content    String
+  timestamp  DateTime
+  confidence Int?
+  sourcePath String?
+}
+
+model SiemConfig {
+  id        String  @id @default("default")
+  url       String
+  apiKey    String
+  connected Boolean
+}
+
+model SiemRule {
+  id          String  @id
+  name        String
+  description String
+  query       String
+  severity    String
+  risk_score  Int
+  enabled     Boolean
+}
+
+model McpConfig {
+  id      String @id @default("default")
+  command String
+  args    String // JSON stringified array of arguments
+  enabled Boolean @default(true)
+}

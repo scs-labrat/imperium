@@ -12,32 +12,34 @@ export const getListeners = async (req: Request, res: Response) => {
 };
 
 export const createListener = async (req: Request, res: Response) => {
+    console.log('Creating listener with body:', req.body);
     try {
         const newListener = await c2Service.createListener(req.body);
         res.status(201).json(newListener);
     } catch (error) {
-        res.status(500).json({ message: 'Error creating listener' });
+        res.status(500).json({ message: 'Failed to create listener' });
     }
 };
 
-export const deleteListener = async (req: Request, res: Response) => {
+export const deleteListener = (req: Request, res: Response) => {
     try {
-        await c2Service.deleteListener(req.params.id);
+        c2Service.deleteListener(req.params.id);
         res.status(204).send();
     } catch (error) {
-        res.status(500).json({ message: 'Error deleting listener' });
+        res.status(404).json({ message: 'Listener not found' });
     }
 };
 
-export const toggleListenerStatus = async (req: Request, res: Response) => {
+export const toggleListenerStatus = (req: Request, res: Response) => {
     try {
-        const updatedListener = await c2Service.toggleListenerStatus(req.params.id, req.body.status);
+        const updatedListener = c2Service.toggleListenerStatus(req.params.id, req.body.status);
         res.json(updatedListener);
     } catch (error) {
-        res.status(500).json({ message: 'Error updating listener status' });
+        res.status(404).json({ message: 'Listener not found' });
     }
 };
 
+// --- Redirector Controllers ---
 export const getRedirectors = async (req: Request, res: Response) => {
     try {
         const redirectors = await c2Service.getRedirectors();
@@ -48,11 +50,12 @@ export const getRedirectors = async (req: Request, res: Response) => {
 };
 
 export const createRedirector = async (req: Request, res: Response) => {
+    console.log('Creating redirector with body:', req.body);
     try {
         const newRedirector = await c2Service.createRedirector(req.body);
         res.status(201).json(newRedirector);
     } catch (error) {
-        res.status(500).json({ message: 'Error creating redirector' });
+        res.status(500).json({ message: 'Failed to create redirector' });
     }
 };
 
@@ -107,5 +110,90 @@ export const getLoot = async (req: Request, res: Response) => {
         res.json(loot);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching loot' });
+    }
+};
+
+export const simulateNewAgent = async (req: Request, res: Response) => {
+    try {
+        const { listenerId, os } = req.body;
+        const newAgent = await c2Service.simulateNewAgent(listenerId, os);
+        res.status(201).json(newAgent);
+    } catch (error) {
+        res.status(500).json({ message: 'Error simulating new agent' });
+    }
+};
+
+export const checkInAgent = async (req: Request, res: Response) => {
+    try {
+        const { listenerId, os } = req.body;
+        const newAgent = await c2Service.checkInAgent(listenerId, os);
+        res.status(201).json(newAgent);
+    } catch (error) {
+        res.status(500).json({ message: 'Error checking in agent' });
+    }
+};
+
+export const getSiemConfig = async (req: Request, res: Response) => {
+    try {
+        const config = await c2Service.getSiemConfig();
+        res.json(config);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching SIEM config' });
+    }
+};
+
+export const saveSiemConfig = async (req: Request, res: Response) => {
+    try {
+        const config = await c2Service.saveSiemConfig(req.body);
+        res.json(config);
+    } catch (error) {
+        res.status(500).json({ message: 'Error saving SIEM config' });
+    }
+};
+
+export const testSiemConnection = async (req: Request, res: Response) => {
+    try {
+        const result = await c2Service.testSiemConnection(req.body);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ message: 'Error testing SIEM connection' });
+    }
+};
+
+export const querySiem = async (req: Request, res: Response) => {
+    try {
+        const { query } = req.body;
+        const results = await c2Service.querySiem(query);
+        res.json(results);
+    } catch (error) {
+        res.status(500).json({ message: 'Error querying SIEM' });
+    }
+};
+
+export const getSiemRules = async (req: Request, res: Response) => {
+    try {
+        const rules = await c2Service.getSiemRules();
+        res.json(rules);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching SIEM rules' });
+    }
+};
+
+export const toggleSiemRule = async (req: Request, res: Response) => {
+    try {
+        const rule = await c2Service.toggleSiemRule(req.params.id);
+        res.json(rule);
+    } catch (error) {
+        res.status(500).json({ message: 'Error toggling SIEM rule' });
+    }
+};
+
+export const submitDslQuery = async (req: Request, res: Response) => {
+    try {
+        const { dslQuery } = req.body;
+        const result = await c2Service.submitDslQuery(dslQuery);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ message: error instanceof Error ? error.message : 'Error submitting DSL query' });
     }
 };

@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { TargetIcon, CodeIcon, TerminalIcon, ActivityIcon, FileTextIcon, ShieldIcon, SparklesIcon, SaveIcon, BotIcon, SearchIcon, VaultIcon, UploadCloudIcon, WrenchIcon, TrashIcon, BracesIcon, LayoutDashboardIcon, FlaskConicalIcon, LineChartIcon, ChainIcon, PackageIcon, SkullIcon, ChevronDownIcon, ServerIcon, CpuIcon, DatabaseIcon, ClipboardListIcon, NetworkIcon, IntelIcon, UsersIcon, PlusIcon, XIcon, ImperiumLogo, FileDownIcon, KeyRoundIcon, BookTextIcon, ZapIcon, SettingsIcon, BrainCircuitIcon, FileSearchIcon, CrosshairIcon } from './components/icons';
 import Loader from './components/Loader';
-import { generateCode, analyzeExecutionLog, obfuscateCode, performOsintAnalysis, analyzeVulnerabilityScan, parseNaturalLanguageCommand, analyzeSpiderfootJson, applyAnalysisRecommendations, generateExploitFromFinding, analyzeJavaScriptCode, simulateCodeExecution, performEvasionAnalysis, planMission, fetchVulnerabilityDetails, generateLoader, refineCode, chainPayloads, generateShellcode, performAdvancedOsintAnalysis, planDefenceMission, generateValidationPlan, generateDetectionRule, optimizeDetectionRule, explainDetectionRule, DetectIQOutput, generateIrPlan, convertKqlToDsl, analyzeSiemResponse, generateThreatHuntCode, analyzeThreatHuntLog } from './services/apiService';
+import VulnerabilityReport from './components/VulnerabilityReport';
+import { generateCode, analyzeExecutionLog, obfuscateCode, performOsintAnalysis, analyzeVulnerabilityScan, parseNaturalLanguageCommand, analyzeSpiderfootJson, applyAnalysisRecommendations, generateExploitFromFinding, analyzeJavaScriptCode, simulateCodeExecution, performEvasionAnalysis, planMission, fetchVulnerabilityDetails, generateLoader, refineCode, chainPayloads, generateShellcode, performAdvancedOsintAnalysis, planDefenceMission, generateValidationPlan, generateDetectionRule, optimizeDetectionRule, explainDetectionRule, DetectIQOutput, generateIrPlan, generateIrTabletopScenario, convertKqlToDsl, analyzeSiemResponse, generateThreatHuntCode, analyzeThreatHuntLog } from './services/apiService';
 import { c2Service } from './services/c2Service';
 import { AttackType, CodeLanguage, TargetOS, GenerationParams, ObfuscationTechnique, VaultItem, ShellcodeParams, Listener, Agent, Loot, User, EventLog, UserRole, LLMProvider, Permissions, LLMConfig, SiemConfig, SiemRule, Redirector, C2Framework, CloudProvider, VmSize, OverlaySoftware, ForwardingMethod, ReverseProxy, PayloadType } from './types';
 import { marked } from 'marked';
@@ -57,14 +58,14 @@ const OUTPUT_FORMATS: { [key: string]: string } = {
 };
 
 const AVAILABLE_MODELS: Record<LLMProvider, string[]> = {
-    [LLMProvider.GOOGLE]: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-flash-latest"],
+    [LLMProvider.GOOGLE]: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-latest"],
 };
 
 type View = 'DASHBOARD' | 'ATTACK_PLAN' | 'RECON' | 'WEAPONIZATION' | 'CHAINER' | 'SHELLCODE' | 'LISTENERS' | 'AGENTS' | 'LOOT' | 'REPORTING' | 'AGENT_BUILDER' | 'EVENT_LOG' | 'SETTINGS' | 'DEFEND' | 'OFFENSIVE_INFRA' | 'REDIRECTORS';
 type ReconTab = 'OSINT' | 'SPIDERFOOT' | 'SCAN' | 'JS_ANALYSIS';
 type WeaponizationTab = 'CODE' | 'LOG' | 'EVASION_ANALYSIS' | 'POST_EXEC_ANALYSIS';
-type DefendTab = 'PLANNER' | 'SIEM' | 'VALIDATION' | 'DETECTIQ' | 'IR_ASSIST' | 'THREAT_HUNT';
-type SettingsTab = 'PROFILE' | 'LLM_CONFIG' | 'USER_MANAGEMENT' | 'PLATFORM';
+type DefendTab = 'PLANNER' | 'SIEM' | 'VALIDATION' | 'DETECTIQ' | 'IR_ASSIST' | 'THREAT_HUNT' | 'IR_TABLETOP';
+type SettingsTab = 'PROFILE' | 'LLM_CONFIG' | 'USER_MANAGEMENT' | 'PLATFORM' | 'MCP_CONFIG';
 
 // --- Monaco Editor Component ---
 declare const monaco: any;
@@ -594,7 +595,45 @@ export default function App() {
     // Defend State
     const [siemConfig, setSiemConfig] = useState<SiemConfig>({ url: '', apiKey: '', connected: false });
     const [siemConfigInputs, setSiemConfigInputs] = useState({ url: '', apiKey: '' });
+    
+    // MCP State
+    const [mcpConfig, setMcpConfig] = useState({ command: '', args: [] as string[], enabled: false });
+    const [mcpConfigInputs, setMcpConfigInputs] = useState({ command: '', args: '' }); // args as string for input
+
     const [defenceObjective, setDefenceObjective] = useState('');
+
+    // ... (existing code)
+
+    useEffect(() => {
+        if (settingsTab === 'MCP_CONFIG') {
+            c2Service.getMcpConfig().then(config => {
+                setMcpConfig(config);
+                setMcpConfigInputs({
+                    command: config.command,
+                    args: config.args.join(' ')
+                });
+            }).catch(err => console.error("Failed to load MCP config", err));
+        }
+    }, [settingsTab]);
+
+    const handleSaveMcpConfig = async () => {
+        setIsLoading(true);
+        try {
+            const argsArray = mcpConfigInputs.args.split(' ').filter(a => a.trim() !== '');
+            const newConfig = {
+                command: mcpConfigInputs.command,
+                args: argsArray,
+                enabled: mcpConfig.enabled
+            };
+            await c2Service.saveMcpConfig(newConfig);
+            setMcpConfig(newConfig);
+            showToast('MCP Configuration saved.');
+        } catch (error) {
+            showToast('Failed to save MCP config.', 'error');
+        } finally {
+            setIsLoading(false);
+        }
+    };
     const [defencePlan, setDefencePlan] = useState('');
     const [parsedDefencePlan, setParsedDefencePlan] = useState<DefenceMissionStep[]>([]);
     const [validationObjective, setValidationObjective] = useState('');
@@ -622,6 +661,10 @@ export default function App() {
     const [irObjective, setIrObjective] = useState('');
     const [irPlan, setIrPlan] = useState('');
     const [parsedIrPlan, setParsedIrPlan] = useState<IrPlan | null>(null);
+
+    // IR Tabletop State
+    const [irTabletopObjective, setIrTabletopObjective] = useState('');
+    const [irTabletopScenario, setIrTabletopScenario] = useState('');
     
     type SiemSubmitStep = 'IDLE' | 'COLLECT_VARS' | 'SHOW_CURL' | 'SHOW_RESPONSE' | 'SHOW_ANALYSIS';
     interface SiemSubmitState {
@@ -799,12 +842,38 @@ export default function App() {
         refreshRedirectors();
         refreshSiemConfig();
 
+        // Socket.IO Event Listeners
+        const handleNewAgent = (newAgent: Agent) => {
+            setAgents(prev => [newAgent, ...prev]);
+            showToast(`New agent connected: ${newAgent.hostname}`);
+            logEvent('Agent Check-in', `New agent ${newAgent.hostname} connected.`);
+        };
+
+        const handleAgentStatusChange = (updatedAgent: Agent) => {
+            setAgents(prev => prev.map(a => a.id === updatedAgent.id ? updatedAgent : a));
+        };
+
+        const handleNewLoot = (newLoot: Loot) => {
+            setLoot(prev => [newLoot, ...prev]);
+            showToast(`New loot received from agent.`);
+            logEvent('Loot Received', `Type: ${newLoot.type}`);
+        };
+
+        c2Service.on('new_agent', handleNewAgent);
+        c2Service.on('agent_status_change', handleAgentStatusChange);
+        c2Service.on('new_loot', handleNewLoot);
+
         const intervalId = setInterval(() => {
             refreshAgents();
-        }, 5000); // Poll for agent status updates
+        }, 30000); // Poll less frequently now that we have sockets (fallback)
 
-        return () => clearInterval(intervalId);
-    }, [refreshAgents, refreshSiemConfig, refreshRedirectors, refreshLoot, refreshListeners]);
+        return () => {
+            clearInterval(intervalId);
+            c2Service.off('new_agent', handleNewAgent);
+            c2Service.off('agent_status_change', handleAgentStatusChange);
+            c2Service.off('new_loot', handleNewLoot);
+        };
+    }, [refreshAgents, refreshSiemConfig, refreshRedirectors, refreshLoot, refreshListeners, logEvent]);
 
     useEffect(() => {
         if (activeView === 'DEFEND' && defendTab === 'SIEM') {
@@ -1151,6 +1220,21 @@ export default function App() {
             setIsLoading(false);
         }
     }, [jsCodeInput, logEvent, getModelForTask]);
+
+    const handleWeaponizeFromReport = (params: { objective: string; attackType: AttackType; language: CodeLanguage; targetOS: TargetOS }) => {
+        setParams({
+            objective: params.objective,
+            attackType: params.attackType,
+            language: params.language,
+            target: {
+                os: params.targetOS,
+                version: OS_VERSIONS[params.targetOS][0],
+                architecture: 'x86_64',
+            }
+        });
+        setActiveView('WEAPONIZATION');
+        showToast(`Loaded exploit details into Weaponization.`);
+    };
     
      const handlePlanMission = useCallback(async () => {
         if (!missionObjective) return;
@@ -1472,6 +1556,24 @@ export default function App() {
             setIsLoading(false);
         }
     }, [irObjective, logEvent, getModelForTask]);
+
+    const handleGenerateIrTabletopScenario = useCallback(async () => {
+        if (!irTabletopObjective) return;
+        setIsLoading(true);
+        setLoadingMessage('Generating IR tabletop scenario...');
+        setIrTabletopScenario('');
+        logEvent('IR Tabletop Scenario Generation Started', `Objective: ${irTabletopObjective}`);
+        try {
+            const model = getModelForTask();
+            const result = await generateIrTabletopScenario(irTabletopObjective, model);
+            setIrTabletopScenario(result);
+        } catch (error) {
+            console.error("IR Tabletop Scenario Error:", error);
+            setIrTabletopScenario(`### IR Tabletop Scenario Generation Error\nAn error occurred.`);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [irTabletopObjective, logEvent, getModelForTask]);
     
     // --- IR Assist SIEM Submit Handlers ---
     const handleInitiateSiemSubmit = (kqlQuery: string) => {
@@ -2044,6 +2146,7 @@ export default function App() {
                                 <button onClick={() => {setActiveView('DEFEND'); setDefendTab('VALIDATION'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'DEFEND' && defendTab === 'VALIDATION' ? 'bg-primary/20 text-primary' : ''}`}><ZapIcon className="w-4 h-4" /> Control Validation</button>
                                 <button onClick={() => {setActiveView('DEFEND'); setDefendTab('DETECTIQ'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'DEFEND' && defendTab === 'DETECTIQ' ? 'bg-primary/20 text-primary' : ''}`}><BrainCircuitIcon className="w-4 h-4" /> DetectIQ</button>
                                 <button onClick={() => {setActiveView('DEFEND'); setDefendTab('IR_ASSIST'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'DEFEND' && defendTab === 'IR_ASSIST' ? 'bg-primary/20 text-primary' : ''}`}><FileSearchIcon className="w-4 h-4" /> IR Assist</button>
+                                <button onClick={() => {setActiveView('DEFEND'); setDefendTab('IR_TABLETOP'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'DEFEND' && defendTab === 'IR_TABLETOP' ? 'bg-primary/20 text-primary' : ''}`}><BookTextIcon className="w-4 h-4" /> IR Tabletop</button>
                             </div>
                         )}
                     </div>
@@ -2194,7 +2297,8 @@ export default function App() {
                                     {reconTab === 'SCAN' && <textarea value={scanInput} onChange={e => setScanInput(e.target.value)} placeholder="Paste vulnerability scan results (e.g., Nmap, Nessus)" className={`${baseInputStyles} h-full w-full rounded-none border-0`}></textarea>}
                                     {reconTab === 'JS_ANALYSIS' && <textarea value={jsCodeInput} onChange={e => setJsCodeInput(e.target.value)} placeholder="Paste JavaScript code to analyze for secrets and endpoints" className={`${baseInputStyles} h-full w-full rounded-none border-0`}></textarea>}
                                     {(reconTab === 'OSINT' || reconTab === 'SPIDERFOOT') && <MarkdownRenderer content={reconReport} />}
-                                    {(reconTab === 'SCAN' || reconTab === 'JS_ANALYSIS') && reconReport && <MarkdownRenderer content={reconReport} />}
+                                    {reconTab === 'SCAN' && reconReport && <VulnerabilityReport report={reconReport} onWeaponize={handleWeaponizeFromReport} />}
+                                    {(reconTab === 'JS_ANALYSIS') && reconReport && <MarkdownRenderer content={reconReport} />}
                                 </div>
                             </div>
                         </div>
@@ -2827,9 +2931,9 @@ export default function App() {
                         </div>
                          <div className="flex-1 flex overflow-hidden">
                             <div className="w-1/4 border-r border-border p-2">
-                                 {(['PROFILE', 'LLM_CONFIG', 'USER_MANAGEMENT', 'PLATFORM'] as SettingsTab[]).map(tab => {
+                                 {(['PROFILE', 'LLM_CONFIG', 'USER_MANAGEMENT', 'PLATFORM', 'MCP_CONFIG'] as SettingsTab[]).map(tab => {
                                     if(tab === 'USER_MANAGEMENT' && !currentUser.permissions.userManagementAccess) return null;
-                                    if(tab === 'PLATFORM' && currentUser.role !== UserRole.SUPER_ADMIN) return null;
+                                    if((tab === 'PLATFORM' || tab === 'MCP_CONFIG') && currentUser.role !== UserRole.SUPER_ADMIN) return null;
                                     return <button key={tab} onClick={() => setSettingsTab(tab)} className={`w-full text-left p-3 rounded-md font-semibold ${settingsTab === tab ? 'bg-primary/20 text-primary' : 'hover:bg-accent'}`}>{tab.replace('_', ' ')}</button>
                                  })}
                             </div>
@@ -2962,6 +3066,53 @@ export default function App() {
                                                 ))}
                                             </tbody>
                                         </table>
+                                    </div>
+                                )}
+
+                                {settingsTab === 'MCP_CONFIG' && currentUser.role === UserRole.SUPER_ADMIN && (
+                                    <div className="max-w-xl space-y-6">
+                                        <h3 className="text-lg font-bold text-primary border-b border-border pb-2">MCP Server Configuration</h3>
+                                        <p className="text-sm text-muted-foreground">Configure an external Model Context Protocol server for advanced OSINT capabilities.</p>
+                                        
+                                        <div>
+                                            <label className="text-xs font-bold text-muted-foreground">COMMAND</label>
+                                            <input 
+                                                type="text" 
+                                                placeholder="e.g. npx, python3, docker"
+                                                value={mcpConfigInputs.command} 
+                                                onChange={e => setMcpConfigInputs(p => ({...p, command: e.target.value}))} 
+                                                className={baseInputStyles} 
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-bold text-muted-foreground">ARGUMENTS (Space separated)</label>
+                                            <input 
+                                                type="text" 
+                                                placeholder="e.g. -y @modelcontextprotocol/server-sqlite"
+                                                value={mcpConfigInputs.args} 
+                                                onChange={e => setMcpConfigInputs(p => ({...p, args: e.target.value}))} 
+                                                className={baseInputStyles} 
+                                            />
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={mcpConfig.enabled} 
+                                                onChange={e => setMcpConfig(p => ({...p, enabled: e.target.checked}))}
+                                                className="accent-primary w-4 h-4"
+                                            />
+                                            <label className="text-sm font-bold">Enable Custom MCP Server</label>
+                                        </div>
+                                        
+                                        <div className="bg-accent/20 p-4 rounded-md border border-accent">
+                                            <p className="text-xs font-mono text-accent-foreground">
+                                                <strong>Current Configuration:</strong><br/>
+                                                {mcpConfig.command} {mcpConfig.args.join(' ')}
+                                            </p>
+                                        </div>
+
+                                        <button onClick={handleSaveMcpConfig} className={primaryButtonStyles}>Save Configuration</button>
                                     </div>
                                 )}
 

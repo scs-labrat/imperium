@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import c2Router from './c2.js';
 import aiRouter from './ai.js';
+import mcpRouter from './mcp.js';
 
 const router = Router();
 
@@ -11,5 +12,6 @@ router.get('/health', (req, res) => {
 
 router.use('/c2', c2Router);
 router.use('/ai', aiRouter);
+router.use('/mcp', mcpRouter);
 
 export default router;

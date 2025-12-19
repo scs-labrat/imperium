@@ -251,3 +251,9 @@ export type DetectIQOutput = {
     optimizedRule?: string;
 };
 
+export interface McpConfig {
+    command: string;
+    args: string[];
+    enabled: boolean;
+}
+
