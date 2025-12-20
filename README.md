@@ -1,6 +1,6 @@
 # Imperium C2 - AI-Powered Offensive and Defensive Security Framework
 
-![Imperium Logo](https://i.imgur.com/p0nZfJj.png)
+![Imperium Logo](IMPERIUM-demo-small%20(2)%20(1).gif)
 
 **Imperium** is a next-generation command and control (C2) framework that leverages generative AI to supercharge both offensive and defensive security operations. It provides a comprehensive suite of tools for red team engagements, threat emulation, and blue team response, all managed through a modern, intuitive web interface.
 
