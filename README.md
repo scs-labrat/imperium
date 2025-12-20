@@ -58,6 +58,14 @@
 3.  **Access the Application**:
     Open your browser and navigate to `http://localhost:8080`.
 
+4.  **DOCKER IS BROKEN SO.....**
+    cd backend
+    npm install .
+    npm start
+    cd ..
+    npm install .
+    npm run dev
+
 ## 🏛️ Architecture
 
 Imperium consists of two main services orchestrated by Docker Compose:
