@@ -1,97 +1,218 @@
-import * as net from 'net';
 import { PrismaClient } from '@prisma/client';
-import * as c2Service from './c2Service.js';
 import { getIo } from '../socket.js';
+import { createListener, isListenerTypeSupported, IListener, AgentCheckInData } from './listeners/index.js';
 
 const prisma = new PrismaClient();
 
+/**
+ * ListenerManager - Manages all C2 listener instances
+ * Handles starting, stopping, and event routing for listeners
+ */
 class ListenerManager {
-    private activeServers: Map<string, net.Server> = new Map();
+    private activeListeners: Map<string, IListener> = new Map();
 
-    public async startAll() {
-        console.log('Starting all listeners...');
+    /**
+     * Start all listeners that are marked as active in the database
+     */
+    public async startAll(): Promise<void> {
+        console.log('[ListenerManager] Starting all active listeners...');
         const listeners = await prisma.listener.findMany({ where: { status: 'active' } });
+
         for (const listener of listeners) {
-            await this.start(listener.id);
+            try {
+                await this.start(listener.id);
+            } catch (error) {
+                console.error(`[ListenerManager] Failed to start listener ${listener.name}:`, error);
+            }
         }
     }
 
-    public async start(listenerId: string) {
+    /**
+     * Start a specific listener by ID
+     */
+    public async start(listenerId: string): Promise<void> {
         // Stop if already running to re-bind
-        if (this.activeServers.has(listenerId)) {
-            this.stop(listenerId);
+        if (this.activeListeners.has(listenerId)) {
+            await this.stop(listenerId);
         }
 
-        const listener = await prisma.listener.findUnique({ where: { id: listenerId } });
-        if (!listener) {
-            console.error(`Listener ${listenerId} not found.`);
+        const listenerConfig = await prisma.listener.findUnique({ where: { id: listenerId } });
+        if (!listenerConfig) {
+            console.error(`[ListenerManager] Listener ${listenerId} not found in database`);
+            return;
+        }
+
+        // Check if listener type is supported
+        if (!isListenerTypeSupported(listenerConfig.type)) {
+            console.warn(`[ListenerManager] Listener type ${listenerConfig.type} not yet implemented, skipping ${listenerConfig.name}`);
+            await prisma.listener.update({
+                where: { id: listenerId },
+                data: { status: 'error' }
+            });
+            try {
+                getIo().emit('listener_status_change', { id: listenerId, status: 'error', message: `Type ${listenerConfig.type} not supported` });
+            } catch (e) {}
             return;
         }
 
         try {
-            const server = net.createServer(socket => {
-                console.log(`New connection to listener ${listener.name} from ${socket.remoteAddress}:${socket.remotePort}`);
-                // In a real scenario, this is where you'd handle agent check-ins,
-                // parse agent data, and potentially register a new agent in the DB.
-                // For now, we'll just log and close the connection.
-                socket.end('Connection received by C2 listener.\n');
+            // Create listener instance
+            const listener = createListener({
+                id: listenerConfig.id,
+                name: listenerConfig.name,
+                type: listenerConfig.type,
+                host: listenerConfig.host,
+                port: listenerConfig.port,
+                hostHeader: listenerConfig.hostHeader || undefined,
+                redirectorId: listenerConfig.redirectorId || undefined
             });
 
-            server.on('error', async (err: NodeJS.ErrnoException) => {
-                console.error(`Error with listener ${listener.name} on ${listener.host}:${listener.port}:`, err.message);
-                if (err.code === 'EADDRINUSE') {
-                    console.error(`Port ${listener.port} is already in use.`);
-                    // Update listener status in DB to reflect error
-                    await prisma.listener.update({
-                        where: { id: listener.id },
-                        data: { status: 'error' }
-                    });
-                    getIo().emit('listener_status_change', { id: listener.id, status: 'error' });
-                }
-                this.activeServers.delete(listener.id); // Remove from active even on error
-            });
+            // Wire up event handlers
+            this.setupEventHandlers(listener);
 
-            await new Promise<void>((resolve, reject) => {
-                server.listen(listener.port, listener.host, () => {
-                    console.log(`Listener "${listener.name}" started on ${listener.host}:${listener.port}`);
-                    this.activeServers.set(listener.id, server);
-                    resolve();
-                });
-                server.once('error', reject); // Catch errors that occur during listen
-            });
-        } catch (error) {
-            console.error(`Failed to start listener ${listener.name} on ${listener.host}:${listener.port}:`, error);
-            // Ensure status is updated even if listen() promise rejects
+            // Start the listener
+            await listener.start();
+
+            // Store in active listeners
+            this.activeListeners.set(listenerId, listener);
+
+            // Update status in database
             await prisma.listener.update({
-                where: { id: listener.id },
+                where: { id: listenerId },
+                data: { status: 'active' }
+            });
+
+            // Emit status change
+            try {
+                getIo().emit('listener_status_change', { id: listenerId, status: 'active' });
+            } catch (e) {}
+
+        } catch (error: any) {
+            console.error(`[ListenerManager] Failed to start listener ${listenerConfig.name}:`, error.message);
+
+            // Update status to error
+            await prisma.listener.update({
+                where: { id: listenerId },
                 data: { status: 'error' }
             });
-            getIo().emit('listener_status_change', { id: listener.id, status: 'error' });
-        }
-    }
 
-    public stop(listenerId: string) {
-        const server = this.activeServers.get(listenerId);
-        if (server) {
-            server.close(() => {
-                console.log(`Listener ${listenerId} stopped.`);
-                this.activeServers.delete(listenerId);
-            });
-        }
-    }
-
-    public async stopAll() {
-        console.log('Stopping all active listeners...');
-        for (const [listenerId, server] of this.activeServers) {
-            await new Promise<void>((resolve) => {
-                server.close(() => {
-                    console.log(`Listener ${listenerId} stopped.`);
-                    this.activeServers.delete(listenerId);
-                    resolve();
+            // Emit error status
+            try {
+                getIo().emit('listener_status_change', {
+                    id: listenerId,
+                    status: 'error',
+                    message: error.code === 'EADDRINUSE'
+                        ? `Port ${listenerConfig.port} is already in use`
+                        : error.message
                 });
-            });
+            } catch (e) {}
+
+            throw error;
         }
+    }
+
+    /**
+     * Stop a specific listener
+     */
+    public async stop(listenerId: string): Promise<void> {
+        const listener = this.activeListeners.get(listenerId);
+        if (listener) {
+            await listener.stop();
+            this.activeListeners.delete(listenerId);
+            console.log(`[ListenerManager] Listener ${listenerId} stopped`);
+        }
+    }
+
+    /**
+     * Stop all active listeners
+     */
+    public async stopAll(): Promise<void> {
+        console.log('[ListenerManager] Stopping all active listeners...');
+        const promises: Promise<void>[] = [];
+
+        for (const [listenerId, listener] of this.activeListeners) {
+            promises.push(
+                listener.stop().then(() => {
+                    this.activeListeners.delete(listenerId);
+                    console.log(`[ListenerManager] Listener ${listenerId} stopped`);
+                })
+            );
+        }
+
+        await Promise.all(promises);
+    }
+
+    /**
+     * Check if a listener is currently running
+     */
+    public isRunning(listenerId: string): boolean {
+        const listener = this.activeListeners.get(listenerId);
+        return listener?.isRunning() ?? false;
+    }
+
+    /**
+     * Get all active listener IDs
+     */
+    public getActiveListenerIds(): string[] {
+        return Array.from(this.activeListeners.keys());
+    }
+
+    /**
+     * Setup event handlers for a listener
+     */
+    private setupEventHandlers(listener: IListener): void {
+        // Handle new agent check-ins
+        listener.on('agent_checkin', async (data: AgentCheckInData, remoteAddr: string) => {
+            console.log(`[ListenerManager] New agent check-in from ${remoteAddr}: ${data.agentId}`);
+
+            // Emit Socket.IO event for real-time UI update
+            try {
+                const agent = await prisma.agent.findUnique({ where: { id: data.agentId } });
+                if (agent) {
+                    getIo().emit('new_agent', {
+                        ...agent,
+                        lastSeen: agent.lastSeen.toISOString(),
+                        firstSeen: agent.firstSeen.toISOString()
+                    });
+                }
+            } catch (e) {
+                console.warn('[ListenerManager] Failed to emit new_agent event:', e);
+            }
+        });
+
+        // Handle task results
+        listener.on('task_result', async (data) => {
+            console.log(`[ListenerManager] Task result received: ${data.taskId} - ${data.success ? 'success' : 'failed'}`);
+
+            // Socket.IO event is already emitted by taskQueueService.completeTask()
+            // Additional handling can be added here if needed
+        });
+
+        // Handle errors
+        listener.on('error', (error) => {
+            console.error(`[ListenerManager] Listener ${listener.config.name} error:`, error);
+
+            // Try to update status
+            prisma.listener.update({
+                where: { id: listener.config.id },
+                data: { status: 'error' }
+            }).catch(() => {});
+
+            try {
+                getIo().emit('listener_status_change', {
+                    id: listener.config.id,
+                    status: 'error',
+                    message: error.message
+                });
+            } catch (e) {}
+        });
+
+        // Handle stop events
+        listener.on('stopped', () => {
+            this.activeListeners.delete(listener.config.id);
+        });
     }
 }
 
+// Singleton instance
 export const listenerManager = new ListenerManager();

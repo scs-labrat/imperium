@@ -1,0 +1,168 @@
+---
+# Configure Traffic Forwarding on Redirector
+# Supports: socat, nginx, haproxy, rinetd
+
+- name: Configure Traffic Forwarding
+  hosts: redirectors
+  become: yes
+  vars:
+    forwarding_method: "socat"  # socat, nginx, haproxy, rinetd
+    listen_port: 80
+    listen_protocol: "tcp"
+    target_host: "10.42.0.1"
+    target_port: 8080
+    ssl_enabled: false
+    ssl_cert_path: "/etc/ssl/certs/redirector.crt"
+    ssl_key_path: "/etc/ssl/private/redirector.key"
+    upstream_servers: []  # For load balancing
+
+  tasks:
+    # =========================================================================
+    # SOCAT - Simple TCP/UDP forwarding
+    # =========================================================================
+    - name: Configure socat forwarding
+      block:
+        - name: Create socat systemd service
+          copy:
+            content: |
+              [Unit]
+              Description=Socat Forwarder - Port {{ listen_port }} to {{ target_host }}:{{ target_port }}
+              After=network.target
+
+              [Service]
+              Type=simple
+              ExecStart=/usr/bin/socat {{ 'TCP' if listen_protocol == 'tcp' else 'UDP' }}-LISTEN:{{ listen_port }},fork,reuseaddr {{ 'TCP' if listen_protocol == 'tcp' else 'UDP' }}:{{ target_host }}:{{ target_port }}
+              Restart=always
+              RestartSec=5
+
+              [Install]
+              WantedBy=multi-user.target
+            dest: "/etc/systemd/system/socat-forward-{{ listen_port }}.service"
+            mode: '0644'
+          notify:
+            - Reload systemd
+            - Restart socat forwarder
+
+        - name: Enable and start socat forwarder
+          systemd:
+            name: "socat-forward-{{ listen_port }}"
+            enabled: yes
+            state: started
+      when: forwarding_method == "socat"
+
+    # =========================================================================
+    # NGINX - HTTP/HTTPS reverse proxy
+    # =========================================================================
+    - name: Configure nginx forwarding
+      block:
+        - name: Ensure nginx is installed
+          apt:
+            name: nginx
+            state: present
+
+        - name: Remove default nginx site
+          file:
+            path: /etc/nginx/sites-enabled/default
+            state: absent
+
+        - name: Create nginx upstream config
+          template:
+            src: nginx-upstream.conf.j2
+            dest: "/etc/nginx/sites-available/forward-{{ listen_port }}.conf"
+            mode: '0644'
+          notify: Reload nginx
+
+        - name: Enable nginx site
+          file:
+            src: "/etc/nginx/sites-available/forward-{{ listen_port }}.conf"
+            dest: "/etc/nginx/sites-enabled/forward-{{ listen_port }}.conf"
+            state: link
+          notify: Reload nginx
+
+        - name: Enable and start nginx
+          systemd:
+            name: nginx
+            enabled: yes
+            state: started
+      when: forwarding_method == "nginx"
+
+    # =========================================================================
+    # HAPROXY - Load balancing and TCP proxy
+    # =========================================================================
+    - name: Configure haproxy forwarding
+      block:
+        - name: Ensure haproxy is installed
+          apt:
+            name: haproxy
+            state: present
+
+        - name: Create haproxy config
+          template:
+            src: haproxy.cfg.j2
+            dest: /etc/haproxy/haproxy.cfg
+            mode: '0644'
+            validate: 'haproxy -c -f %s'
+          notify: Restart haproxy
+
+        - name: Enable and start haproxy
+          systemd:
+            name: haproxy
+            enabled: yes
+            state: started
+      when: forwarding_method == "haproxy"
+
+    # =========================================================================
+    # RINETD - Simple TCP redirector
+    # =========================================================================
+    - name: Configure rinetd forwarding
+      block:
+        - name: Install rinetd
+          apt:
+            name: rinetd
+            state: present
+
+        - name: Configure rinetd
+          lineinfile:
+            path: /etc/rinetd.conf
+            line: "0.0.0.0 {{ listen_port }} {{ target_host }} {{ target_port }}"
+            create: yes
+          notify: Restart rinetd
+
+        - name: Enable and start rinetd
+          systemd:
+            name: rinetd
+            enabled: yes
+            state: started
+      when: forwarding_method == "rinetd"
+
+    # Allow ports in firewall
+    - name: Allow forwarding port in UFW
+      ufw:
+        rule: allow
+        port: "{{ listen_port }}"
+        proto: "{{ listen_protocol }}"
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart socat forwarder
+      systemd:
+        name: "socat-forward-{{ listen_port }}"
+        state: restarted
+
+    - name: Reload nginx
+      systemd:
+        name: nginx
+        state: reloaded
+
+    - name: Restart haproxy
+      systemd:
+        name: haproxy
+        state: restarted
+
+    - name: Restart rinetd
+      systemd:
+        name: rinetd
+        state: restarted

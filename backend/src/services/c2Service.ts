@@ -1,6 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { Listener, Agent, Loot, SiemConfig, SiemRule, Redirector } from '../types/index.js';
 import { getIo } from '../socket.js';
+import { taskQueueService, CreateTaskInput } from './taskQueueService.js';
+import { cryptoService } from './cryptoService.js';
+import { elasticsearchService } from './elasticsearchService.js';
+import { payloadService, StagerConfig } from './payloadService.js';
+import { listenerManager } from './listenerManager.js';
 
 const prisma = new PrismaClient();
 
@@ -77,29 +82,6 @@ const seedData = async () => {
 
 // Seed on module load (in a real app, do this in a dedicated script)
 seedData().catch(console.error);
-
-// --- Mock SIEM Data (kept in-memory for now as it's read-only mock) ---
-const mockSiemLogs = [
-    { '@timestamp': new Date(Date.now() - 10000).toISOString(), 'process.name': 'powershell.exe', 'process.command_line': 'powershell -ExecutionPolicy Bypass -File C:\Users\john.doe\Desktop\Invoke-Mimikatz.ps1', 'event.action': 'process_started', 'user.name': 'john.doe' },
-    { '@timestamp': new Date(Date.now() - 9000).toISOString(), 'process.name': 'lsass.exe', 'event.action': 'process_accessed', 'source.ip': '192.168.1.101', 'destination.ip': '192.168.1.101', 'user.name': 'john.doe', 'process.parent.name': 'powershell.exe' },
-    { '@timestamp': new Date(Date.now() - 8000).toISOString(), 'process.name': 'rundll32.exe', 'process.command_line': 'rundll32.exe C:\Users\john.doe\AppData\Local\Temp\malicious.dll,EntryPoint', 'event.action': 'process_started', 'user.name': 'john.doe' },
-    { '@timestamp': new Date(Date.now() - 7000).toISOString(), 'file.path': 'C:\Users\john.doe\Documents\secret.docx', 'event.action': 'file_access', 'process.name': 'rundll32.exe' },
-    { '@timestamp': new Date(Date.now() - 6000).toISOString(), 'network.direction': 'egress', 'destination.ip': '45.33.32.156', 'destination.port': 80, 'process.name': 'rundll32.exe', 'network.protocol': 'http' },
-    { '@timestamp': new Date(Date.now() - 5000).toISOString(), 'process.name': 'schtasks.exe', 'process.command_line': '/create /sc minute /mo 1 /tn "Updater" /tr C:\Users\Public\beacon.exe', 'event.action': 'process_started', 'user.name': 'SYSTEM' },
-];
-
-const mockSiemResponse = {
-    "took": 15,
-    "timed_out": false,
-    "_shards": { "total": 5, "successful": 5, "skipped": 0, "failed": 0 },
-    "hits": {
-        "total": { "value": 2, "relation": "eq" },
-        "max_score": 1.0,
-        "hits": [
-             { "_index": "logs-generic", "_id": "1", "_score": 1.0, "_source": { "@timestamp": new Date().toISOString(), "process": { "name": "powershell.exe" }, "event": { "category": "network_traffic" } } }
-        ]
-    }
-};
 
 // --- Listener Management ---
 export const getListeners = async (): Promise<Listener[]> => {
@@ -220,14 +202,23 @@ export const getAgent = async (id: string): Promise<Agent> => {
     } as unknown as Agent;
 };
 
+/**
+ * Simulate a new agent check-in (for testing purposes)
+ * Creates both the agent and an AgentSession with a generated session key
+ */
 export const simulateNewAgent = async (listenerId: string, os: string): Promise<Agent> => {
     const listener = await prisma.listener.findUnique({ where: { id: listenerId } });
     if (!listener) throw new Error('Invalid listener ID');
 
     const now = new Date();
+    const agentId = `a${Date.now()}`;
+
+    // Generate a session key for testing
+    const sessionKey = cryptoService.generateSessionKey();
+
     const newAgent = await prisma.agent.create({
         data: {
-            id: `a${Date.now()}`,
+            id: agentId,
             os,
             osVersion: os === 'windows' ? 'Windows 11 Pro' : os === 'linux' ? 'Ubuntu 22.04 LTS' : 'macOS Sonoma',
             hostname: generateHostname(os),
@@ -243,7 +234,17 @@ export const simulateNewAgent = async (listenerId: string, os: string): Promise<
             processName: os === 'windows' ? 'powershell.exe' : '/bin/bash'
         }
     });
-    
+
+    // Create AgentSession for the simulated agent
+    await prisma.agentSession.create({
+        data: {
+            agentId: newAgent.id,
+            sessionKey: sessionKey.toString('base64'),
+            lastCheckIn: now,
+            checkInCount: 1
+        }
+    });
+
     // Emit new agent event
     try { getIo().emit('new_agent', newAgent); } catch(e) {}
 
@@ -255,14 +256,23 @@ export const simulateNewAgent = async (listenerId: string, os: string): Promise<
     } as unknown as Agent;
 };
 
+/**
+ * Manual agent check-in (for testing via API)
+ * Creates both the agent and an AgentSession with a generated session key
+ */
 export const checkInAgent = async (listenerId: string, os: string): Promise<Agent> => {
     const listener = await prisma.listener.findUnique({ where: { id: listenerId } });
     if (!listener) throw new Error('Invalid listener ID');
 
     const now = new Date();
+    const agentId = `a${Date.now()}`;
+
+    // Generate a session key
+    const sessionKey = cryptoService.generateSessionKey();
+
     const newAgent = await prisma.agent.create({
         data: {
-            id: `a${Date.now()}`,
+            id: agentId,
             os,
             osVersion: os === 'windows' ? 'Windows 11 Pro' : os === 'linux' ? 'Ubuntu 22.04 LTS' : 'macOS Sonoma',
             hostname: generateHostname(os),
@@ -278,7 +288,17 @@ export const checkInAgent = async (listenerId: string, os: string): Promise<Agen
             processName: os === 'windows' ? 'powershell.exe' : '/bin/bash'
         }
     });
-    
+
+    // Create AgentSession
+    await prisma.agentSession.create({
+        data: {
+            agentId: newAgent.id,
+            sessionKey: sessionKey.toString('base64'),
+            lastCheckIn: now,
+            checkInCount: 1
+        }
+    });
+
     // Emit new agent event
     try { getIo().emit('new_agent', newAgent); } catch(e) {}
 
@@ -290,61 +310,180 @@ export const checkInAgent = async (listenerId: string, os: string): Promise<Agen
     } as unknown as Agent;
 };
 
-export const executeCommand = async (agentId: string, command: string): Promise<string> => {
+/**
+ * Queue a shell command for execution on an agent
+ * Returns a task object - actual output comes async via Socket.IO
+ */
+export const executeCommand = async (agentId: string, command: string, userId?: string): Promise<{ taskId: string; status: string; message: string }> => {
     const agent = await prisma.agent.findUnique({ where: { id: agentId } });
     if (!agent) throw new Error('Agent not found');
 
-    let output = '';
-    if (agent.os === 'windows') {
-        if (command.toLowerCase() === 'whoami') output = `${agent.hostname}\${agent.user}`;
-        else if (command.toLowerCase().startsWith('dir')) output = `Volume in drive C has no label.\n Directory of C:\Users\${agent.user}`;
-        else output = `'${command}' is not recognized.`;
-    } else {
-        if (command.toLowerCase() === 'whoami') output = agent.user;
-        else if (command.toLowerCase() === 'ls') output = 'Documents Downloads';
-        else output = `${command}: command not found`;
-    }
-    return output;
-};
-
-export const runTask = async (agentId: string, task: string): Promise<Loot> => {
-    const agent = await prisma.agent.findUnique({ where: { id: agentId } });
-    if (!agent) throw new Error('Agent not found');
-
-    let lootData: any = {
-        id: `loot${Date.now()}`,
-        agentId: agent.id,
-        timestamp: new Date()
-    };
-
-    switch (task) {
-        case 'credential_harvesting':
-            lootData = { ...lootData, type: 'credential', source: 'mimikatz', content: `SAM Account: ${agent.user} NTLM: 1a2b3c4d...` };
-            break;
-        case 'network_scan':
-            lootData = { ...lootData, type: 'network_data', source: 'arp -a', content: `192.168.1.1 - Gateway` };
-            break;
-        case 'system_enum':
-            lootData = { ...lootData, type: 'system_output', source: 'systeminfo', content: `OS: ${agent.osVersion}` };
-            break;
-        case 'privesc_check':
-            lootData = { ...lootData, type: 'system_output', source: 'privesc_check.sh', content: `[+] Unquoted service paths found...` };
-            break;
-        default:
-            throw new Error('Unknown task');
-    }
-
-    const newLoot = await prisma.loot.create({ data: lootData });
-
-    // Emit new loot event
-    try { getIo().emit('new_loot', newLoot); } catch(e) {}
+    // Create task in queue
+    const task = await taskQueueService.createTask(agentId, {
+        type: 'shell',
+        command,
+        userId
+    });
 
     return {
-        ...newLoot,
-        timestamp: newLoot.timestamp.toISOString(),
-        confidence: newLoot.confidence ?? undefined,
-        sourcePath: newLoot.sourcePath ?? undefined
-    } as unknown as Loot;
+        taskId: task.id,
+        status: 'queued',
+        message: `Command queued for agent ${agent.hostname}. Task ID: ${task.id}. Results will be delivered via Socket.IO when the agent executes the command.`
+    };
+};
+
+/**
+ * Queue a module/task for execution on an agent
+ * Returns a task object - actual output comes async via Socket.IO
+ */
+export const runTask = async (agentId: string, taskType: string, userId?: string): Promise<{ taskId: string; status: string; message: string }> => {
+    const agent = await prisma.agent.findUnique({ where: { id: agentId } });
+    if (!agent) throw new Error('Agent not found');
+
+    // Map task types to actual commands/modules
+    const taskCommands: Record<string, { command: string; args?: Record<string, any> }> = {
+        'credential_harvesting': { command: 'mimikatz', args: { action: 'sekurlsa::logonpasswords' } },
+        'network_scan': { command: 'arp', args: { flags: '-a' } },
+        'system_enum': { command: 'systeminfo', args: {} },
+        'privesc_check': { command: 'privesc_check', args: { thorough: true } },
+        'file_discovery': { command: 'find_files', args: { patterns: ['*.docx', '*.xlsx', '*.pdf', '*.txt'] } },
+        'process_list': { command: 'ps', args: { all: true } },
+        'screenshot': { command: 'screenshot', args: {} },
+        'keylogger_start': { command: 'keylogger', args: { action: 'start' } },
+        'keylogger_stop': { command: 'keylogger', args: { action: 'stop' } }
+    };
+
+    const taskConfig = taskCommands[taskType];
+    if (!taskConfig) {
+        throw new Error(`Unknown task type: ${taskType}. Valid types: ${Object.keys(taskCommands).join(', ')}`);
+    }
+
+    // Create task in queue
+    const task = await taskQueueService.createTask(agentId, {
+        type: 'module',
+        command: taskConfig.command,
+        arguments: taskConfig.args,
+        userId
+    });
+
+    return {
+        taskId: task.id,
+        status: 'queued',
+        message: `Task '${taskType}' queued for agent ${agent.hostname}. Task ID: ${task.id}. Results will be delivered via Socket.IO when the agent executes the task.`
+    };
+};
+
+/**
+ * Get all tasks for an agent
+ */
+export const getAgentTasks = async (agentId: string, status?: string) => {
+    const agent = await prisma.agent.findUnique({ where: { id: agentId } });
+    if (!agent) throw new Error('Agent not found');
+
+    const tasks = await taskQueueService.getAgentTasks(agentId, status);
+    return tasks.map(t => ({
+        ...t,
+        arguments: t.arguments ? JSON.parse(t.arguments) : null,
+        createdAt: t.createdAt.toISOString(),
+        sentAt: t.sentAt?.toISOString() || null,
+        completedAt: t.completedAt?.toISOString() || null
+    }));
+};
+
+/**
+ * Get a specific task by ID
+ */
+export const getTask = async (taskId: string) => {
+    const task = await taskQueueService.getTask(taskId);
+    if (!task) throw new Error('Task not found');
+
+    return {
+        ...task,
+        arguments: task.arguments ? JSON.parse(task.arguments) : null,
+        createdAt: task.createdAt.toISOString(),
+        sentAt: task.sentAt?.toISOString() || null,
+        completedAt: task.completedAt?.toISOString() || null
+    };
+};
+
+/**
+ * Get task statistics for an agent
+ */
+export const getAgentTaskStats = async (agentId: string) => {
+    const agent = await prisma.agent.findUnique({ where: { id: agentId } });
+    if (!agent) throw new Error('Agent not found');
+
+    return taskQueueService.getAgentTaskStats(agentId);
+};
+
+/**
+ * Cancel a pending task
+ */
+export const cancelTask = async (taskId: string) => {
+    const cancelled = await taskQueueService.cancelTask(taskId);
+    if (!cancelled) throw new Error('Task not found or cannot be cancelled (only pending tasks can be cancelled)');
+
+    return {
+        taskId: cancelled.id,
+        status: 'cancelled',
+        message: 'Task cancelled successfully'
+    };
+};
+
+/**
+ * Retry a failed task
+ */
+export const retryTask = async (taskId: string) => {
+    const newTask = await taskQueueService.retryTask(taskId);
+    if (!newTask) throw new Error('Task not found or cannot be retried (only failed tasks can be retried)');
+
+    return {
+        taskId: newTask.id,
+        originalTaskId: taskId,
+        status: 'queued',
+        message: 'Task retried successfully - new task created'
+    };
+};
+
+/**
+ * Upload a file to an agent
+ */
+export const uploadFile = async (agentId: string, filePath: string, content: Buffer, userId?: string) => {
+    const agent = await prisma.agent.findUnique({ where: { id: agentId } });
+    if (!agent) throw new Error('Agent not found');
+
+    const task = await taskQueueService.createTask(agentId, {
+        type: 'upload',
+        command: filePath,
+        arguments: { content: content.toString('base64') },
+        userId
+    });
+
+    return {
+        taskId: task.id,
+        status: 'queued',
+        message: `File upload queued for ${filePath}`
+    };
+};
+
+/**
+ * Download a file from an agent
+ */
+export const downloadFile = async (agentId: string, filePath: string, userId?: string) => {
+    const agent = await prisma.agent.findUnique({ where: { id: agentId } });
+    if (!agent) throw new Error('Agent not found');
+
+    const task = await taskQueueService.createTask(agentId, {
+        type: 'download',
+        command: filePath,
+        userId
+    });
+
+    return {
+        taskId: task.id,
+        status: 'queued',
+        message: `File download queued for ${filePath}`
+    };
 };
 
 // --- Loot Management ---
@@ -378,25 +517,65 @@ export const saveSiemConfig = async (configData: SiemConfig): Promise<SiemConfig
     return config as unknown as SiemConfig;
 };
 
-export const testSiemConnection = async (config: SiemConfig): Promise<{ success: boolean; message: string }> => {
-    if (config.url && config.apiKey && config.url.startsWith('http') && config.apiKey.length > 10) {
-        return { success: true, message: 'Successfully connected to Elastic SIEM.' };
-    } else {
-        return { success: false, message: 'Connection failed. Please check URL and API Key.' };
+/**
+ * Test connection to Elasticsearch SIEM
+ * Actually connects to Elasticsearch and validates credentials
+ */
+export const testSiemConnection = async (config: SiemConfig): Promise<{ success: boolean; message: string; clusterInfo?: any }> => {
+    if (!config.url || !config.apiKey) {
+        return { success: false, message: 'URL and API Key are required' };
     }
+
+    // Attempt real connection to Elasticsearch
+    const result = await elasticsearchService.connect({
+        url: config.url,
+        apiKey: config.apiKey,
+        verifyTls: config.verifyTls,
+        cloudId: config.cloudId || undefined,
+        indexPattern: config.indexPattern || 'logs-*'
+    });
+
+    // If successful, update the database with connected status
+    if (result.success) {
+        await prisma.siemConfig.upsert({
+            where: { id: 'default' },
+            update: { connected: true },
+            create: { id: 'default', url: config.url, apiKey: config.apiKey, connected: true }
+        });
+    }
+
+    return result;
 };
 
-export const querySiem = async (kqlQuery: string): Promise<any[]> => {
-    const keywords = (kqlQuery.match(/"(.*?)"/g) || []).map(k => k.replace(/"/g, '').toLowerCase());
-    if (keywords.length === 0) keywords.push(...kqlQuery.toLowerCase().split(' '));
+/**
+ * Query SIEM using KQL (Kibana Query Language)
+ * Executes real Elasticsearch query
+ */
+export const querySiem = async (kqlQuery: string, options?: {
+    index?: string;
+    size?: number;
+    from?: number;
+    timeRange?: { gte: string; lte: string };
+}): Promise<any[]> => {
+    // Check if connected
+    if (!elasticsearchService.isConnected()) {
+        // Try to initialize from database config
+        const initResult = await elasticsearchService.initFromDatabase();
+        if (!initResult.success) {
+            throw new Error(initResult.message);
+        }
+    }
 
-    const results = mockSiemLogs.filter(log => {
-         const logString = JSON.stringify(log).toLowerCase();
-         return keywords.some(keyword => keyword && logString.includes(keyword));
+    // Execute the query
+    const result = await elasticsearchService.queryKql(kqlQuery, {
+        index: options?.index,
+        size: options?.size || 100,
+        from: options?.from || 0,
+        timeRange: options?.timeRange
     });
-    
-    await new Promise(res => setTimeout(res, 1000));
-    return results;
+
+    // Return just the source documents for backward compatibility
+    return result.hits.map(hit => hit._source);
 };
 
 export const getSiemRules = async (): Promise<SiemRule[]> => {
@@ -415,11 +594,49 @@ export const toggleSiemRule = async (ruleId: string): Promise<SiemRule> => {
     return updatedRule as unknown as SiemRule;
 };
 
-export const submitDslQuery = async (dslQuery: string): Promise<any> => {
-    await new Promise(res => setTimeout(res, 800));
-    const config = await getSiemConfig();
-    if (!config.connected) {
-        return Promise.reject(new Error("SIEM not connected."));
+/**
+ * Submit a raw Elasticsearch DSL query
+ * Executes real Elasticsearch DSL query
+ */
+export const submitDslQuery = async (dslQuery: string, options?: {
+    index?: string;
+}): Promise<any> => {
+    // Check if connected
+    if (!elasticsearchService.isConnected()) {
+        // Try to initialize from database config
+        const initResult = await elasticsearchService.initFromDatabase();
+        if (!initResult.success) {
+            throw new Error(initResult.message);
+        }
     }
-    return Promise.resolve(mockSiemResponse);
+
+    // Execute the DSL query
+    const result = await elasticsearchService.queryDsl(dslQuery, {
+        index: options?.index
+    });
+
+    // Return full Elasticsearch response format for DSL queries
+    return {
+        took: result.took,
+        timed_out: result.timedOut,
+        hits: {
+            total: { value: result.total, relation: 'eq' },
+            hits: result.hits
+        }
+    };
+};
+
+// --- Payload Generation ---
+/**
+ * Generate a stager payload
+ */
+export const generatePayload = async (config: StagerConfig) => {
+    return payloadService.generateStager(config);
+};
+
+/**
+ * Get available payload formats
+ */
+export const getPayloadFormats = () => {
+    return payloadService.getAvailableFormats();
 };

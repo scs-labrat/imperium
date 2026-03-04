@@ -1,0 +1,119 @@
+---
+# Install and Configure Nebula Overlay Network
+# Nebula is a scalable overlay networking tool with a focus on performance, simplicity and security
+
+- name: Install Nebula Overlay Network
+  hosts: redirectors
+  become: yes
+  vars:
+    nebula_version: "1.8.2"
+    nebula_dir: /opt/nebula
+    nebula_config_dir: /etc/nebula
+    is_lighthouse: false
+    lighthouse_hosts: []
+    overlay_ip: ""
+    overlay_subnet: "10.42.0.0/16"
+
+  tasks:
+    - name: Create Nebula directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ nebula_dir }}"
+        - "{{ nebula_config_dir }}"
+
+    - name: Download Nebula binary
+      get_url:
+        url: "https://github.com/slackhq/nebula/releases/download/v{{ nebula_version }}/nebula-linux-amd64.tar.gz"
+        dest: "/tmp/nebula.tar.gz"
+        mode: '0644'
+
+    - name: Extract Nebula binary
+      unarchive:
+        src: /tmp/nebula.tar.gz
+        dest: "{{ nebula_dir }}"
+        remote_src: yes
+
+    - name: Create symlinks for Nebula binaries
+      file:
+        src: "{{ nebula_dir }}/{{ item }}"
+        dest: "/usr/local/bin/{{ item }}"
+        state: link
+      loop:
+        - nebula
+        - nebula-cert
+
+    - name: Copy CA certificate
+      copy:
+        content: "{{ nebula_ca_cert }}"
+        dest: "{{ nebula_config_dir }}/ca.crt"
+        mode: '0644'
+      when: nebula_ca_cert is defined
+
+    - name: Copy host certificate
+      copy:
+        content: "{{ nebula_host_cert }}"
+        dest: "{{ nebula_config_dir }}/host.crt"
+        mode: '0644'
+      when: nebula_host_cert is defined
+
+    - name: Copy host key
+      copy:
+        content: "{{ nebula_host_key }}"
+        dest: "{{ nebula_config_dir }}/host.key"
+        mode: '0600'
+      when: nebula_host_key is defined
+
+    - name: Deploy Nebula configuration
+      template:
+        src: nebula-config.yml.j2
+        dest: "{{ nebula_config_dir }}/config.yml"
+        mode: '0644'
+      notify: Restart Nebula
+
+    - name: Create Nebula systemd service
+      copy:
+        content: |
+          [Unit]
+          Description=Nebula Overlay Network
+          Wants=basic.target
+          After=basic.target network.target
+
+          [Service]
+          SyslogIdentifier=nebula
+          ExecReload=/bin/kill -HUP $MAINPID
+          ExecStart=/usr/local/bin/nebula -config {{ nebula_config_dir }}/config.yml
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/nebula.service
+        mode: '0644'
+      notify:
+        - Reload systemd
+        - Restart Nebula
+
+    - name: Enable and start Nebula service
+      systemd:
+        name: nebula
+        enabled: yes
+        state: started
+
+    - name: Allow Nebula traffic in UFW
+      ufw:
+        rule: allow
+        port: '4242'
+        proto: udp
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart Nebula
+      systemd:
+        name: nebula
+        state: restarted

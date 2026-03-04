@@ -1,0 +1,115 @@
+---
+# Install and Configure WireGuard Overlay Network
+# WireGuard is a fast, modern, secure VPN tunnel
+
+- name: Install WireGuard Overlay Network
+  hosts: redirectors
+  become: yes
+  vars:
+    wireguard_interface: wg0
+    wireguard_port: 51820
+    wireguard_config_dir: /etc/wireguard
+    overlay_ip: ""
+    overlay_subnet: "10.43.0.0/24"
+    is_server: false
+    server_public_key: ""
+    server_endpoint: ""
+    private_key: ""
+    peers: []
+
+  tasks:
+    - name: Install WireGuard
+      apt:
+        name:
+          - wireguard
+          - wireguard-tools
+        state: present
+        update_cache: yes
+
+    - name: Create WireGuard config directory
+      file:
+        path: "{{ wireguard_config_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Deploy WireGuard private key
+      copy:
+        content: "{{ private_key }}"
+        dest: "{{ wireguard_config_dir }}/privatekey"
+        mode: '0600'
+      when: private_key is defined and private_key != ""
+      notify: Restart WireGuard
+
+    - name: Generate WireGuard keys if not provided
+      block:
+        - name: Generate private key
+          shell: wg genkey
+          register: wg_privkey
+          when: private_key is not defined or private_key == ""
+
+        - name: Save private key
+          copy:
+            content: "{{ wg_privkey.stdout }}"
+            dest: "{{ wireguard_config_dir }}/privatekey"
+            mode: '0600'
+          when: wg_privkey is defined and wg_privkey.stdout is defined
+
+        - name: Generate public key
+          shell: "cat {{ wireguard_config_dir }}/privatekey | wg pubkey"
+          register: wg_pubkey
+
+        - name: Save public key
+          copy:
+            content: "{{ wg_pubkey.stdout }}"
+            dest: "{{ wireguard_config_dir }}/publickey"
+            mode: '0644'
+      when: private_key is not defined or private_key == ""
+
+    - name: Read private key
+      slurp:
+        src: "{{ wireguard_config_dir }}/privatekey"
+      register: wg_private_key_file
+
+    - name: Deploy WireGuard server configuration
+      template:
+        src: wireguard-server.conf.j2
+        dest: "{{ wireguard_config_dir }}/{{ wireguard_interface }}.conf"
+        mode: '0600'
+      when: is_server
+      notify: Restart WireGuard
+
+    - name: Deploy WireGuard client configuration
+      template:
+        src: wireguard-client.conf.j2
+        dest: "{{ wireguard_config_dir }}/{{ wireguard_interface }}.conf"
+        mode: '0600'
+      when: not is_server
+      notify: Restart WireGuard
+
+    - name: Enable IP forwarding
+      sysctl:
+        name: "{{ item }}"
+        value: '1'
+        state: present
+        reload: yes
+      loop:
+        - net.ipv4.ip_forward
+        - net.ipv4.conf.all.forwarding
+
+    - name: Allow WireGuard port in UFW
+      ufw:
+        rule: allow
+        port: "{{ wireguard_port }}"
+        proto: udp
+
+    - name: Enable and start WireGuard
+      systemd:
+        name: "wg-quick@{{ wireguard_interface }}"
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Restart WireGuard
+      systemd:
+        name: "wg-quick@{{ wireguard_interface }}"
+        state: restarted

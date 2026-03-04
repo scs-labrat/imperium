@@ -1,0 +1,655 @@
+POST /.alerts-security.alerts-default%2Capm-*-transaction*%2Cauditbeat-*%2Cendgame-*%2Cfilebeat-*%2Clogs-*%2Cpacketbeat-*%2Ctraces-apm*%2Cwinlogbeat-*%2C-*elastic-cloud-logs-*/_async_search?batched_reduce_size=64&wait_for_completion_timeout=200ms&keep_on_completion=true&keep_alive=60000ms&ignore_unavailable=true&preference=1767571462043
+{
+  "query": {
+    "bool": {
+      "must": [],
+      "filter": [
+        {
+          "range": {
+            "@timestamp": {
+              "format": "strict_date_optional_time",
+              "gte": "2026-01-04T13:00:00.000Z",
+              "lte": "2026-01-05T12:59:59.999Z"
+            }
+          }
+        }
+      ],
+      "should": [],
+      "must_not": []
+    }
+  },
+  "aggs": {
+    "0": {
+      "terms": {
+        "field": "data_stream.dataset",
+        "order": {
+          "2": "desc"
+        },
+        "size": 99
+      },
+      "aggs": {
+        "1": {
+          "terms": {
+            "field": "agent.name",
+            "order": {
+              "2": "desc"
+            },
+            "size": 100
+          },
+          "aggs": {
+            "2": {
+              "max": {
+                "field": "@timestamp"
+              }
+            }
+          }
+        },
+        "2": {
+          "max": {
+            "field": "@timestamp"
+          }
+        }
+      }
+    }
+  },
+  "size": 0,
+  "_source": {
+    "excludes": []
+  },
+  "stored_fields": [
+    "*"
+  ],
+  "runtime_mappings": {},
+  "script_fields": {},
+  "fields": [
+    {
+      "field": "@timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "Responses.@timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "Target.dll.Ext.compile_time",
+      "format": "date_time"
+    },
+    {
+      "field": "Target.process.Ext.dll.Ext.compile_time",
+      "format": "date_time"
+    },
+    {
+      "field": "Target.process.parent.Ext.dll.Ext.compile_time",
+      "format": "date_time"
+    },
+    {
+      "field": "Target.process.parent.start",
+      "format": "date_time"
+    },
+    {
+      "field": "Target.process.start",
+      "format": "date_time"
+    },
+    {
+      "field": "Target.process.thread.Ext.start",
+      "format": "date_time"
+    },
+    {
+      "field": "azure.auditlogs.properties.activity_datetime",
+      "format": "date_time"
+    },
+    {
+      "field": "azure.identityprotection.properties.activity_datetime",
+      "format": "date_time"
+    },
+    {
+      "field": "azure.identityprotection.properties.detected_datetime",
+      "format": "date_time"
+    },
+    {
+      "field": "azure.identityprotection.properties.last_updated_datetime",
+      "format": "date_time"
+    },
+    {
+      "field": "azure.identityprotection.properties.risk_last_updated_datetime",
+      "format": "date_time"
+    },
+    {
+      "field": "azure.provisioning.properties.activity_datetime",
+      "format": "date_time"
+    },
+    {
+      "field": "azure.signinlogs.properties.created_at",
+      "format": "date_time"
+    },
+    {
+      "field": "completed_at",
+      "format": "date_time"
+    },
+    {
+      "field": "dll.Ext.compile_time",
+      "format": "date_time"
+    },
+    {
+      "field": "dll.code_signature.timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "email.delivery_timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "email.origination_timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "event.created",
+      "format": "date_time"
+    },
+    {
+      "field": "event.end",
+      "format": "date_time"
+    },
+    {
+      "field": "event.ingested",
+      "format": "date_time"
+    },
+    {
+      "field": "event.start",
+      "format": "date_time"
+    },
+    {
+      "field": "file.accessed",
+      "format": "date_time"
+    },
+    {
+      "field": "file.code_signature.timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "file.created",
+      "format": "date_time"
+    },
+    {
+      "field": "file.ctime",
+      "format": "date_time"
+    },
+    {
+      "field": "file.elf.creation_date",
+      "format": "date_time"
+    },
+    {
+      "field": "file.mtime",
+      "format": "date_time"
+    },
+    {
+      "field": "file.x509.not_after",
+      "format": "date_time"
+    },
+    {
+      "field": "file.x509.not_before",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.end",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.intended_timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.last_detected",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.original_event.created",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.original_event.end",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.original_event.ingested",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.original_event.start",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.original_time",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.rule.created_at",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.rule.execution.timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.rule.updated_at",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.start",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.suppression.end",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.suppression.start",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.threshold_result.from",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.updated_at",
+      "format": "date_time"
+    },
+    {
+      "field": "kibana.alert.workflow_status_updated_at",
+      "format": "date_time"
+    },
+    {
+      "field": "microsoft.defender_endpoint.lastUpdateTime",
+      "format": "date_time"
+    },
+    {
+      "field": "microsoft.defender_endpoint.resolvedTime",
+      "format": "date_time"
+    },
+    {
+      "field": "microsoft_defender_endpoint.machine_action.cancellation_date_time_utc",
+      "format": "date_time"
+    },
+    {
+      "field": "microsoft_defender_endpoint.machine_action.creation_date_time_utc",
+      "format": "date_time"
+    },
+    {
+      "field": "microsoft_defender_endpoint.machine_action.last_update_date_time_utc",
+      "format": "date_time"
+    },
+    {
+      "field": "o365.audit.Data.at",
+      "format": "date_time"
+    },
+    {
+      "field": "o365.audit.Data.md",
+      "format": "date_time"
+    },
+    {
+      "field": "o365.audit.Data.te",
+      "format": "date_time"
+    },
+    {
+      "field": "o365.audit.Data.ts",
+      "format": "date_time"
+    },
+    {
+      "field": "o365.audit.Data.ttdt",
+      "format": "date_time"
+    },
+    {
+      "field": "o365.audit.EndTimeUtc",
+      "format": "date_time"
+    },
+    {
+      "field": "o365.audit.ExchangeMetaData.Sent",
+      "format": "date_time"
+    },
+    {
+      "field": "o365.audit.FilteringDate",
+      "format": "date_time"
+    },
+    {
+      "field": "o365.audit.LastUpdateTimeUtc",
+      "format": "date_time"
+    },
+    {
+      "field": "package.installed",
+      "format": "date_time"
+    },
+    {
+      "field": "process.Ext.dll.Ext.compile_time",
+      "format": "date_time"
+    },
+    {
+      "field": "process.code_signature.timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "process.elf.creation_date",
+      "format": "date_time"
+    },
+    {
+      "field": "process.end",
+      "format": "date_time"
+    },
+    {
+      "field": "process.entry_leader.parent.session_leader.start",
+      "format": "date_time"
+    },
+    {
+      "field": "process.entry_leader.parent.start",
+      "format": "date_time"
+    },
+    {
+      "field": "process.entry_leader.start",
+      "format": "date_time"
+    },
+    {
+      "field": "process.group_leader.start",
+      "format": "date_time"
+    },
+    {
+      "field": "process.parent.Ext.dll.Ext.compile_time",
+      "format": "date_time"
+    },
+    {
+      "field": "process.parent.code_signature.timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "process.parent.elf.creation_date",
+      "format": "date_time"
+    },
+    {
+      "field": "process.parent.end",
+      "format": "date_time"
+    },
+    {
+      "field": "process.parent.group_leader.start",
+      "format": "date_time"
+    },
+    {
+      "field": "process.parent.start",
+      "format": "date_time"
+    },
+    {
+      "field": "process.session_leader.parent.session_leader.start",
+      "format": "date_time"
+    },
+    {
+      "field": "process.session_leader.parent.start",
+      "format": "date_time"
+    },
+    {
+      "field": "process.session_leader.start",
+      "format": "date_time"
+    },
+    {
+      "field": "process.start",
+      "format": "date_time"
+    },
+    {
+      "field": "process.thread.Ext.start",
+      "format": "date_time"
+    },
+    {
+      "field": "signal.original_event.created",
+      "format": "date_time"
+    },
+    {
+      "field": "signal.original_event.end",
+      "format": "date_time"
+    },
+    {
+      "field": "signal.original_event.start",
+      "format": "date_time"
+    },
+    {
+      "field": "signal.original_time",
+      "format": "date_time"
+    },
+    {
+      "field": "signal.rule.created_at",
+      "format": "date_time"
+    },
+    {
+      "field": "signal.rule.updated_at",
+      "format": "date_time"
+    },
+    {
+      "field": "signal.threshold_result.from",
+      "format": "date_time"
+    },
+    {
+      "field": "sqlserver.audit.event_time",
+      "format": "date_time"
+    },
+    {
+      "field": "started_at",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.file.accessed",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.file.code_signature.timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.file.created",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.file.ctime",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.file.elf.creation_date",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.file.mtime",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.file.x509.not_after",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.file.x509.not_before",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.first_seen",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.last_seen",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.modified_at",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.x509.not_after",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.indicator.x509.not_before",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.enrichments.matched.occurred",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.file.accessed",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.file.code_signature.timestamp",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.file.created",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.file.ctime",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.file.elf.creation_date",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.file.mtime",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.file.x509.not_after",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.file.x509.not_before",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.first_seen",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.last_seen",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.modified_at",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.x509.not_after",
+      "format": "date_time"
+    },
+    {
+      "field": "threat.indicator.x509.not_before",
+      "format": "date_time"
+    },
+    {
+      "field": "tls.client.not_after",
+      "format": "date_time"
+    },
+    {
+      "field": "tls.client.not_before",
+      "format": "date_time"
+    },
+    {
+      "field": "tls.client.x509.not_after",
+      "format": "date_time"
+    },
+    {
+      "field": "tls.client.x509.not_before",
+      "format": "date_time"
+    },
+    {
+      "field": "tls.server.not_after",
+      "format": "date_time"
+    },
+    {
+      "field": "tls.server.not_before",
+      "format": "date_time"
+    },
+    {
+      "field": "tls.server.x509.not_after",
+      "format": "date_time"
+    },
+    {
+      "field": "tls.server.x509.not_before",
+      "format": "date_time"
+    },
+    {
+      "field": "winlog.event_data.AS_security_intelligence_creation_time",
+      "format": "date_time"
+    },
+    {
+      "field": "winlog.event_data.AV_security_intelligence_creation_time",
+      "format": "date_time"
+    },
+    {
+      "field": "winlog.event_data.ClientCreationTime",
+      "format": "date_time"
+    },
+    {
+      "field": "winlog.event_data.Detection_Time",
+      "format": "date_time"
+    },
+    {
+      "field": "winlog.event_data.Last_full_scan_end_time",
+      "format": "date_time"
+    },
+    {
+      "field": "winlog.event_data.Last_full_scan_start_time",
+      "format": "date_time"
+    },
+    {
+      "field": "winlog.event_data.Last_quick_scan_end_time",
+      "format": "date_time"
+    },
+    {
+      "field": "winlog.event_data.Last_quick_scan_start_time",
+      "format": "date_time"
+    },
+    {
+      "field": "winlog.time_created",
+      "format": "date_time"
+    }
+  ]
+}
+
+### Bucket for agents offline for one hour ###
+
+"aggs": {
+  "0": {
+    "terms": {
+      "field": "data_stream.dataset",
+      "order": { "2": "desc" },
+      "size": 99
+    },
+    "aggs": {
+      "1": {
+        "terms": {
+          "field": "agent.name",
+          "order": { "2": "desc" },
+          "size": 100
+        },
+        "aggs": {
+          "2": {
+            "max": { "field": "@timestamp" }
+          },
+          "offline_filter": {
+            "bucket_selector": {
+              "buckets_path": {
+                "last_seen": "2"
+              },
+              "script": "params.last_seen <= Instant.now().minus(60, ChronoUnit.MINUTES).toEpochMilli()"
+            }
+          }
+        }
+      },
+      "2": {
+        "max": { "field": "@timestamp" }
+      },
+      "offline_filter": {
+        "bucket_selector": {
+          "buckets_path": {
+            "last_seen": "2"
+          },
+          "script": "params.last_seen <= Instant.now().minus(60, ChronoUnit.MINUTES).toEpochMilli()"
+        }
+      }
+    }
+  }
+}

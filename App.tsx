@@ -6,6 +6,7 @@ import { generateCode, analyzeExecutionLog, obfuscateCode, performOsintAnalysis,
 import { c2Service } from './services/c2Service';
 import { AttackType, CodeLanguage, TargetOS, GenerationParams, ObfuscationTechnique, VaultItem, ShellcodeParams, Listener, Agent, Loot, User, EventLog, UserRole, LLMProvider, Permissions, LLMConfig, SiemConfig, SiemRule, Redirector, C2Framework, CloudProvider, VmSize, OverlaySoftware, ForwardingMethod, ReverseProxy, PayloadType } from './types';
 import { marked } from 'marked';
+import ISOContainer from './components/iso/ISOContainer';
 
 
 // --- Static Data ---
@@ -59,12 +60,13 @@ const OUTPUT_FORMATS: { [key: string]: string } = {
 
 const AVAILABLE_MODELS: Record<LLMProvider, string[]> = {
     [LLMProvider.GOOGLE]: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-latest"],
+    [LLMProvider.ANTHROPIC]: ["claude-sonnet-4-20250514", "claude-opus-4-5-20251101"],
 };
 
 type View = 'DASHBOARD' | 'ATTACK_PLAN' | 'RECON' | 'WEAPONIZATION' | 'CHAINER' | 'SHELLCODE' | 'LISTENERS' | 'AGENTS' | 'LOOT' | 'REPORTING' | 'AGENT_BUILDER' | 'EVENT_LOG' | 'SETTINGS' | 'DEFEND' | 'OFFENSIVE_INFRA' | 'REDIRECTORS';
 type ReconTab = 'OSINT' | 'SPIDERFOOT' | 'SCAN' | 'JS_ANALYSIS';
 type WeaponizationTab = 'CODE' | 'LOG' | 'EVASION_ANALYSIS' | 'POST_EXEC_ANALYSIS';
-type DefendTab = 'PLANNER' | 'SIEM' | 'VALIDATION' | 'DETECTIQ' | 'IR_ASSIST' | 'THREAT_HUNT' | 'IR_TABLETOP';
+type DefendTab = 'PLANNER' | 'SIEM' | 'VALIDATION' | 'DETECTIQ' | 'IR_ASSIST' | 'THREAT_HUNT' | 'IR_TABLETOP' | 'ISO';
 type SettingsTab = 'PROFILE' | 'LLM_CONFIG' | 'USER_MANAGEMENT' | 'PLATFORM' | 'MCP_CONFIG';
 
 // --- Monaco Editor Component ---
@@ -2147,6 +2149,7 @@ export default function App() {
                                 <button onClick={() => {setActiveView('DEFEND'); setDefendTab('DETECTIQ'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'DEFEND' && defendTab === 'DETECTIQ' ? 'bg-primary/20 text-primary' : ''}`}><BrainCircuitIcon className="w-4 h-4" /> DetectIQ</button>
                                 <button onClick={() => {setActiveView('DEFEND'); setDefendTab('IR_ASSIST'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'DEFEND' && defendTab === 'IR_ASSIST' ? 'bg-primary/20 text-primary' : ''}`}><FileSearchIcon className="w-4 h-4" /> IR Assist</button>
                                 <button onClick={() => {setActiveView('DEFEND'); setDefendTab('IR_TABLETOP'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'DEFEND' && defendTab === 'IR_TABLETOP' ? 'bg-primary/20 text-primary' : ''}`}><BookTextIcon className="w-4 h-4" /> IR Tabletop</button>
+                                <button onClick={() => {setActiveView('DEFEND'); setDefendTab('ISO'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'DEFEND' && defendTab === 'ISO' ? 'bg-primary/20 text-primary' : ''}`}><NetworkIcon className="w-4 h-4" /> Incident Simulation</button>
                             </div>
                         )}
                     </div>
@@ -2160,11 +2163,13 @@ export default function App() {
                             {openDropdown === 'C2 Operations' && (
                                 <div className="absolute top-full left-0 mt-2 w-64 bg-background border border-border rounded-lg p-2 z-50 shadow-lg shadow-orange-500/10 space-y-1">
                                     <button onClick={() => {setActiveView('OFFENSIVE_INFRA'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'OFFENSIVE_INFRA' ? 'bg-primary/20 text-primary' : ''}`}><NetworkIcon className="w-4 h-4" /> Offensive Infra (IaC)</button>
+                                    {/* Hidden menu items - uncomment when ready
                                     <button onClick={() => {setActiveView('REDIRECTORS'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'REDIRECTORS' ? 'bg-primary/20 text-primary' : ''}`}><ServerIcon className="w-4 h-4" /> Redirectors</button>
                                     <button onClick={() => {setActiveView('LISTENERS'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'LISTENERS' ? 'bg-primary/20 text-primary' : ''}`}><ActivityIcon className="w-4 h-4" /> Listeners</button>
                                     <button onClick={() => {setActiveView('AGENTS'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'AGENTS' ? 'bg-primary/20 text-primary' : ''}`}><UsersIcon className="w-4 h-4" /> Agents</button>
                                     <button onClick={() => {setActiveView('LOOT'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'LOOT' ? 'bg-primary/20 text-primary' : ''}`}><DatabaseIcon className="w-4 h-4" /> Loot</button>
                                     {currentUser.permissions.agentBuilderAccess && <button onClick={() => {setActiveView('AGENT_BUILDER'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'AGENT_BUILDER' ? 'bg-primary/20 text-primary' : ''}`}><PackageIcon className="w-4 h-4" /> Agent Builder</button>}
+                                    */}
                                 </div>
                             )}
                         </div>
@@ -2561,6 +2566,8 @@ export default function App() {
                                 <button onClick={() => setDefendTab('VALIDATION')} className={`w-full text-left p-3 rounded-md font-semibold flex items-center gap-2 ${defendTab === 'VALIDATION' ? 'bg-primary/20 text-primary' : 'hover:bg-accent'}`}><ZapIcon className="w-4 h-4" /> Control Validation</button>
                                 <button onClick={() => setDefendTab('DETECTIQ')} className={`w-full text-left p-3 rounded-md font-semibold flex items-center gap-2 ${defendTab === 'DETECTIQ' ? 'bg-primary/20 text-primary' : 'hover:bg-accent'}`}><BrainCircuitIcon className="w-4 h-4" /> DetectIQ</button>
                                 <button onClick={() => setDefendTab('IR_ASSIST')} className={`w-full text-left p-3 rounded-md font-semibold flex items-center gap-2 ${defendTab === 'IR_ASSIST' ? 'bg-primary/20 text-primary' : 'hover:bg-accent'}`}><FileSearchIcon className="w-4 h-4" /> IR Assist</button>
+                                <button onClick={() => setDefendTab('IR_TABLETOP')} className={`w-full text-left p-3 rounded-md font-semibold flex items-center gap-2 ${defendTab === 'IR_TABLETOP' ? 'bg-primary/20 text-primary' : 'hover:bg-accent'}`}><BookTextIcon className="w-4 h-4" /> IR Tabletop</button>
+                                <button onClick={() => setDefendTab('ISO')} className={`w-full text-left p-3 rounded-md font-semibold flex items-center gap-2 ${defendTab === 'ISO' ? 'bg-primary/20 text-primary' : 'hover:bg-accent'}`}><NetworkIcon className="w-4 h-4" /> ISO</button>
                             </div>
                             <div className="w-3/4 flex flex-col">
                                 {defendTab === 'PLANNER' && (
@@ -2886,6 +2893,86 @@ export default function App() {
                                             )}
                                         </div>
                                      </div>
+                                )}
+                                {defendTab === 'IR_TABLETOP' && (
+                                    <div className="flex flex-col h-full">
+                                        <div className="p-4 border-b border-border">
+                                            <h3 className="text-lg font-bold text-primary mb-2 flex items-center gap-2"><BookTextIcon className="w-5 h-5" /> IR Tabletop Exercise Generator</h3>
+                                            <p className="text-sm text-muted-foreground mb-3">Generate comprehensive incident response tabletop exercises for your security team. Enter a threat scenario to create a complete exercise document.</p>
+                                            <form onSubmit={e => { e.preventDefault(); handleGenerateIrTabletopScenario(); }} className="flex gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={irTabletopObjective}
+                                                    onChange={e => setIrTabletopObjective(e.target.value)}
+                                                    placeholder="Enter threat scenario... e.g., Ransomware attack on critical infrastructure, Supply chain compromise, Insider threat data exfiltration"
+                                                    className={baseInputStyles}
+                                                />
+                                                <button type="submit" disabled={!irTabletopObjective} className={`${primaryButtonStyles} w-auto`}>
+                                                    <SparklesIcon className="w-4 h-4 mr-2" />Generate Exercise
+                                                </button>
+                                            </form>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-4">
+                                            {irTabletopScenario ? (
+                                                <div className="bg-input/30 border border-border rounded-xl p-6">
+                                                    <div className="flex justify-between items-start mb-4">
+                                                        <h4 className="text-lg font-bold text-accent-green">Generated Tabletop Exercise</h4>
+                                                        <div className="flex gap-2">
+                                                            <button
+                                                                onClick={() => handleCopyToClipboard(irTabletopScenario, 'Tabletop Exercise')}
+                                                                className={`${secondaryButtonStyles} w-auto text-xs`}
+                                                            >
+                                                                <ClipboardListIcon className="w-3 h-3 mr-1" /> Copy
+                                                            </button>
+                                                            <button
+                                                                onClick={() => {
+                                                                    const blob = new Blob([irTabletopScenario], { type: 'text/markdown' });
+                                                                    const url = URL.createObjectURL(blob);
+                                                                    const a = document.createElement('a');
+                                                                    a.href = url;
+                                                                    a.download = `tabletop-exercise-${new Date().toISOString().split('T')[0]}.md`;
+                                                                    a.click();
+                                                                    URL.revokeObjectURL(url);
+                                                                }}
+                                                                className={`${secondaryButtonStyles} w-auto text-xs`}
+                                                            >
+                                                                <FileDownIcon className="w-3 h-3 mr-1" /> Export
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <MarkdownRenderer content={irTabletopScenario} />
+                                                </div>
+                                            ) : (
+                                                <div className="flex flex-col items-center justify-center h-full text-center">
+                                                    <BookTextIcon className="w-16 h-16 text-muted-foreground/30 mb-4" />
+                                                    <h4 className="text-lg font-semibold text-muted-foreground mb-2">Create a Tabletop Exercise</h4>
+                                                    <p className="text-sm text-muted-foreground max-w-md">
+                                                        Enter a threat scenario above to generate a complete tabletop exercise including scenario narrative,
+                                                        inject phases, discussion questions, and expected outcomes for your IR team.
+                                                    </p>
+                                                    <div className="mt-6 grid grid-cols-3 gap-4 text-xs text-muted-foreground">
+                                                        <div className="bg-input/50 border border-border rounded-lg p-3">
+                                                            <strong className="text-foreground">Example 1:</strong>
+                                                            <p className="mt-1">Ransomware attack targeting healthcare systems</p>
+                                                        </div>
+                                                        <div className="bg-input/50 border border-border rounded-lg p-3">
+                                                            <strong className="text-foreground">Example 2:</strong>
+                                                            <p className="mt-1">Business email compromise leading to wire fraud</p>
+                                                        </div>
+                                                        <div className="bg-input/50 border border-border rounded-lg p-3">
+                                                            <strong className="text-foreground">Example 3:</strong>
+                                                            <p className="mt-1">Nation-state APT targeting intellectual property</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                                {defendTab === 'ISO' && (
+                                    <div className="flex-1 overflow-hidden">
+                                        <ISOContainer />
+                                    </div>
                                 )}
                             </div>
                         </div>

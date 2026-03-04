@@ -129,6 +129,7 @@ export enum UserRole {
 
 export enum LLMProvider {
     GOOGLE = "Google",
+    ANTHROPIC = "Anthropic",
 }
 
 export interface LLMConfig {
@@ -173,8 +174,11 @@ export interface EventLog {
 
 export interface SiemConfig {
     url: string;
-    apiKey: string; 
+    apiKey: string;
     connected: boolean;
+    verifyTls?: boolean;
+    cloudId?: string;
+    indexPattern?: string;
 }
 
 export interface SiemRule {
