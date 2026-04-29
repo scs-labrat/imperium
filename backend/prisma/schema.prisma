@@ -7,77 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Listener {
-  id           String  @id
-  name         String
-  type         String
-  host         String
-  port         Int
-  status       String
-  redirectorId String?
-  hostHeader   String?
-
-  // Relations
-  routes RedirectorRoute[]
-}
-
-model Redirector {
-  id         String  @id
-  name       String
-  type       String
-  ip         String
-  tier       String // 'Edge' | 'Internal'
-  status     String
-
-  // New fields for distributed C2
-  overlayIp   String?  // Internal overlay network IP
-  sshUser     String?  // For Ansible access
-  sshKeyId    String?  // Reference to stored SSH key
-  forwardPort Int?     // Port to forward traffic to
-  upstreamId  String?  // Next hop redirector (for tiered architecture)
-
-  // Self-referential relation for redirector chain
-  upstream   Redirector?  @relation("RedirectorChain", fields: [upstreamId], references: [id])
-  downstream Redirector[] @relation("RedirectorChain")
-
-  // Relations
-  deployment    RedirectorDeployment?
-  overlayConfig RedirectorOverlayConfig?
-}
-
-model Agent {
-  id                     String   @id
-  os                     String
-  osVersion              String
-  hostname               String
-  user                   String
-  privileges             String
-  ip                     String
-  externalIp             String
-  lastSeen               DateTime
-  firstSeen              DateTime
-  status                 String
-  listener               String
-  pid                    Int
-  processName            String
-  processInjectionTarget String?
-
-  // Relations
-  tasks   Task[]
-  session AgentSession?
-}
-
-model Loot {
-  id         String   @id
-  agentId    String
-  type       String
-  source     String
-  content    String
-  timestamp  DateTime
-  confidence Int?
-  sourcePath String?
-}
-
 model SiemConfig {
   id           String  @id @default("default")
   url          String
@@ -85,7 +14,7 @@ model SiemConfig {
   connected    Boolean
   verifyTls    Boolean @default(true)
   indexPattern String  @default("logs-*")
-  cloudId      String? // For Elastic Cloud
+  cloudId      String?
 }
 
 model SiemRule {
@@ -101,127 +30,14 @@ model SiemRule {
 model McpConfig {
   id      String  @id @default("default")
   command String
-  args    String // JSON stringified array of arguments
+  args    String
   enabled Boolean @default(true)
 }
 
-// ==================== NEW MODELS FOR C2 INFRASTRUCTURE ====================
-
-// Task queue for agent commands
-model Task {
-  id          String    @id @default(cuid())
-  agentId     String
-  agent       Agent     @relation(fields: [agentId], references: [id])
-  type        String    // 'shell', 'module', 'upload', 'download'
-  command     String
-  arguments   String?   // JSON-encoded arguments
-  status      String    @default("pending") // pending, sent, completed, failed
-  priority    Int       @default(5) // 1-10, lower = higher priority
-  output      String?   // Task result (encrypted)
-  error       String?   // Error message if failed
-  createdAt   DateTime  @default(now())
-  sentAt      DateTime?
-  completedAt DateTime?
-  createdBy   String?   // User who created the task
-}
-
-// Agent session management
-model AgentSession {
-  id           String   @id @default(cuid())
-  agentId      String   @unique
-  agent        Agent    @relation(fields: [agentId], references: [id])
-  sessionKey   String   // AES session key (encrypted with server private key)
-  lastCheckIn  DateTime
-  checkInCount Int      @default(0)
-  createdAt    DateTime @default(now())
-}
-
-// Server encryption keys
-model EncryptionKey {
-  id        String    @id @default(cuid())
-  type      String    // 'server_private', 'server_public', 'nebula_ca', 'wireguard_server'
-  keyData   String    // Base64-encoded key
-  algorithm String    // 'RSA-2048', 'AES-256', 'ED25519', etc.
-  createdAt DateTime  @default(now())
-  expiresAt DateTime?
-}
-
-// Redirector deployment state (Terraform)
-model RedirectorDeployment {
-  id              String    @id @default(cuid())
-  redirectorId    String    @unique
-  redirector      Redirector @relation(fields: [redirectorId], references: [id])
-  cloudProvider   String    // 'digitalocean', 'aws', 'azure', 'vultr', 'hetzner'
-  region          String
-  vmSize          String
-  publicIp        String?
-  overlayIp       String?   // Nebula/WireGuard internal IP
-  terraformState  String?   // JSON blob for state
-  status          String    @default("pending") // pending, provisioning, active, failed, destroyed
-  errorMessage    String?
-  createdAt       DateTime  @default(now())
-  lastHealthCheck DateTime?
-}
-
-// Overlay network configuration (Nebula/WireGuard)
-model OverlayNetwork {
-  id           String   @id @default(cuid())
-  name         String
-  type         String   // 'nebula', 'wireguard'
-  subnet       String   // e.g., "10.42.0.0/16"
-  caKey        String?  // Nebula CA private key (encrypted)
-  caCert       String?  // Nebula CA certificate
-  serverKey    String?  // WireGuard server private key (encrypted)
-  serverPubKey String?  // WireGuard server public key
-  listenPort   Int?     // WireGuard listen port
-  config       String?  // JSON: additional configuration
-  createdAt    DateTime @default(now())
-
-  // Relations
-  peers RedirectorOverlayConfig[]
-}
-
-// Per-redirector overlay configuration
-model RedirectorOverlayConfig {
-  id               String         @id @default(cuid())
-  redirectorId     String         @unique
-  redirector       Redirector     @relation(fields: [redirectorId], references: [id])
-  overlayNetworkId String
-  overlayNetwork   OverlayNetwork @relation(fields: [overlayNetworkId], references: [id])
-  overlayIp        String         // IP in overlay network
-  privateKey       String         // Encrypted key for this redirector
-  publicKey        String
-  certificate      String?        // Nebula cert
-  config           String         // Generated config file content
-  createdAt        DateTime       @default(now())
-}
-
-// Traffic routing configuration
-model RedirectorRoute {
-  id               String   @id @default(cuid())
-  listenerId       String
-  listener         Listener @relation(fields: [listenerId], references: [id])
-  hops             String   // JSON array of redirector IDs in order
-  forwardingMethod String   // 'socat', 'nginx', 'haproxy', 'rinetd'
-  active           Boolean  @default(true)
-  createdAt        DateTime @default(now())
-}
-
-// SSH keys for Ansible access
-model SshKey {
-  id         String   @id @default(cuid())
-  name       String
-  publicKey  String
-  privateKey String   // Encrypted
-  passphrase String?  // Encrypted passphrase if set
-  createdAt  DateTime @default(now())
-}
-
-// LLM provider configuration
 model LlmConfig {
   id        String  @id @default("default")
-  provider  String  // 'Google', 'Anthropic'
+  provider  String
   model     String
-  apiKey    String? // Encrypted, optional if using env var
+  apiKey    String?
   isDefault Boolean @default(false)
 }

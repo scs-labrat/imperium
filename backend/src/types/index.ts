@@ -70,56 +70,6 @@ export interface ShellcodeParams {
   outputFormat: string;
 }
 
-export interface Redirector {
-    id: string;
-    name: string;
-    ip: string;
-    type: 'HTTP/S' | 'DNS' | 'TCP' | 'SMB';
-    tier: 'Edge' | 'Internal';
-    status: 'Healthy' | 'Degraded' | 'Down';
-}
-
-export interface Listener {
-  id: string;
-  name: string;
-  type: 'HTTP' | 'HTTPS' | 'TCP' | 'SMB' | 'DNS' | 'mTLS' | 'QUIC' | 'Reverse TCP';
-  host: string;
-  port: number;
-  status: 'active' | 'inactive';
-  redirectorId?: string;
-  jitterMin?: number;
-  jitterMax?: number;
-  hostHeader?: string;
-}
-
-export interface Agent {
-  id: string;
-  os: 'windows' | 'linux' | 'macos';
-  osVersion: string;
-  hostname: string;
-  user: string;
-  privileges: 'User' | 'Admin' | 'Root';
-  ip: string;
-  externalIp: string;
-  lastSeen: string;
-  firstSeen: string;
-  status: 'active' | 'stale' | 'dead' | 'lost';
-  listener: string;
-  pid: number;
-  processName: string;
-  processInjectionTarget?: string;
-}
-
-export interface Loot {
-  id:string;
-  agentId: string;
-  type: 'credential' | 'file' | 'screenshot' | 'keystrokes' | 'browser_artefacts' | 'network_data' | 'system_output';
-  source: string;
-  content: string;
-  timestamp: string;
-  confidence?: number;
-  sourcePath?: string;
-}
 
 export enum UserRole {
     SUPER_ADMIN = "SuperAdmin",
@@ -148,10 +98,8 @@ export interface ScriptEnginePermissions {
 }
 
 export interface Permissions {
-    c2Access: boolean;
     reconAccess: boolean;
     attackPlanningAccess: boolean;
-    agentBuilderAccess: boolean;
     scriptEngineAccess: ScriptEnginePermissions;
     userManagementAccess: boolean;
     settingsAccess: boolean;
@@ -193,62 +141,6 @@ export interface SiemRule {
     enabled: boolean;
 }
 
-// --- Offensive Infrastructure (IaC) Types ---
-
-export enum C2Framework {
-    IMPERIUM = "Imperium (This Platform)",
-    MYTHIC = "Mythic",
-    SLIVER = "Sliver",
-    HAVOC = "Havoc",
-    COBALT_STRIKE = "Cobalt Strike",
-}
-
-export enum CloudProvider {
-    DO = "DigitalOcean",
-    AWS = "AWS",
-    AZURE = "Azure",
-    GCP = "GCP",
-    VULTR = "Vultr",
-    HETZNER = "Hetzner",
-}
-
-export enum VmSize {
-    SMALL = "Small",
-    MEDIUM = "Medium",
-    LARGE = "Large",
-}
-
-export enum OverlaySoftware {
-    NEBULA = "Nebula",
-    WIREGUARD = "WireGuard",
-    ZEROTIER = "ZeroTier",
-}
-
-export enum ForwardingMethod {
-    SOCAT = "socat",
-    HAPROXY = "haproxy",
-    NGINX = "nginx",
-    RINETD = "rinetd",
-}
-
-export enum ReverseProxy {
-    NGINX = "Nginx",
-    CADDY = "Caddy",
-    APACHE = "Apache",
-}
-
-export enum PayloadType {
-    EXE = "EXE",
-    DLL = "DLL",
-    SHELLCODE = "Shellcode",
-    POWERSHELL = "PowerShell",
-    PYTHON = "Python",
-    MACH_O = "Mach-O",
-    ELF = "ELF",
-    HTA = "HTA",
-    VBA = "VBA",
-    MSI = "MSI",
-}
 
 export type DetectIQOutput = {
     rule?: string;

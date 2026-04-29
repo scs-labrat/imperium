@@ -3,8 +3,8 @@ import { TargetIcon, CodeIcon, TerminalIcon, ActivityIcon, FileTextIcon, ShieldI
 import Loader from './components/Loader';
 import VulnerabilityReport from './components/VulnerabilityReport';
 import { generateCode, analyzeExecutionLog, obfuscateCode, performOsintAnalysis, analyzeVulnerabilityScan, parseNaturalLanguageCommand, analyzeSpiderfootJson, applyAnalysisRecommendations, generateExploitFromFinding, analyzeJavaScriptCode, simulateCodeExecution, performEvasionAnalysis, planMission, fetchVulnerabilityDetails, generateLoader, refineCode, chainPayloads, generateShellcode, performAdvancedOsintAnalysis, planDefenceMission, generateValidationPlan, generateDetectionRule, optimizeDetectionRule, explainDetectionRule, DetectIQOutput, generateIrPlan, generateIrTabletopScenario, convertKqlToDsl, analyzeSiemResponse, generateThreatHuntCode, analyzeThreatHuntLog } from './services/apiService';
-import { c2Service } from './services/c2Service';
-import { AttackType, CodeLanguage, TargetOS, GenerationParams, ObfuscationTechnique, VaultItem, ShellcodeParams, Listener, Agent, Loot, User, EventLog, UserRole, LLMProvider, Permissions, LLMConfig, SiemConfig, SiemRule, Redirector, C2Framework, CloudProvider, VmSize, OverlaySoftware, ForwardingMethod, ReverseProxy, PayloadType } from './types';
+import { getSiemConfig, saveSiemConfig, testSiemConnection, querySiem, submitDslQuery, getSiemRules, toggleSiemRule, getMcpConfig, saveMcpConfig } from './services/platformService';
+import { AttackType, CodeLanguage, TargetOS, GenerationParams, ObfuscationTechnique, VaultItem, ShellcodeParams, User, EventLog, UserRole, LLMProvider, Permissions, LLMConfig, SiemConfig, SiemRule } from './types';
 import { marked } from 'marked';
 import ISOContainer from './components/iso/ISOContainer';
 
@@ -64,7 +64,7 @@ const AVAILABLE_MODELS: Record<string, string[]> = {
     [LLMProvider.CUSTOM]: [], // Populated dynamically from custom config
 };
 
-type View = 'DASHBOARD' | 'ATTACK_PLAN' | 'RECON' | 'WEAPONIZATION' | 'CHAINER' | 'SHELLCODE' | 'LISTENERS' | 'AGENTS' | 'LOOT' | 'REPORTING' | 'AGENT_BUILDER' | 'EVENT_LOG' | 'SETTINGS' | 'DEFEND' | 'OFFENSIVE_INFRA' | 'REDIRECTORS';
+type View = 'DASHBOARD' | 'ATTACK_PLAN' | 'RECON' | 'WEAPONIZATION' | 'CHAINER' | 'SHELLCODE' | 'REPORTING' | 'EVENT_LOG' | 'SETTINGS' | 'DEFEND';
 type ReconTab = 'OSINT' | 'SPIDERFOOT' | 'SCAN' | 'JS_ANALYSIS';
 type WeaponizationTab = 'CODE' | 'LOG' | 'EVASION_ANALYSIS' | 'POST_EXEC_ANALYSIS';
 type DefendTab = 'PLANNER' | 'SIEM' | 'VALIDATION' | 'DETECTIQ' | 'IR_ASSIST' | 'THREAT_HUNT' | 'IR_TABLETOP' | 'ISO';
@@ -374,10 +374,8 @@ const MOCK_USERS: User[] = [
         platformLLMConfig: { provider: LLMProvider.ANTHROPIC, model: 'claude-opus-4-7' },
         granularLLMConfig: {},
         permissions: {
-            c2Access: true,
             reconAccess: true,
             attackPlanningAccess: true,
-            agentBuilderAccess: true,
             scriptEngineAccess: { enabled: true, allowedAttackTypes: ALL_ATTACK_TYPES },
             userManagementAccess: true,
             settingsAccess: true,
@@ -390,10 +388,8 @@ const MOCK_USERS: User[] = [
         platformLLMConfig: { provider: LLMProvider.ANTHROPIC, model: 'claude-opus-4-7' },
         granularLLMConfig: {},
         permissions: {
-            c2Access: true,
             reconAccess: true,
             attackPlanningAccess: true,
-            agentBuilderAccess: true,
             scriptEngineAccess: { enabled: true, allowedAttackTypes: ALL_ATTACK_TYPES },
             userManagementAccess: true,
             settingsAccess: false,
@@ -408,12 +404,10 @@ const MOCK_USERS: User[] = [
             [AttackType.DATA_EXFILTRATION]: { provider: LLMProvider.ANTHROPIC, model: 'claude-opus-4-7' }
         },
         permissions: {
-            c2Access: false,
             reconAccess: true,
             attackPlanningAccess: false,
-            agentBuilderAccess: false,
-            scriptEngineAccess: { 
-                enabled: true, 
+            scriptEngineAccess: {
+                enabled: true,
                 allowedAttackTypes: [
                     AttackType.INITIAL_ACCESS,
                     AttackType.LOLBAS,
@@ -425,96 +419,6 @@ const MOCK_USERS: User[] = [
         }
     },
 ];
-
-interface AgentInteractionModalProps {
-    agent: Agent;
-    onClose: () => void;
-    onTaskComplete: (loot: Loot) => void;
-}
-
-const AgentInteractionModal: React.FC<AgentInteractionModalProps> = ({ agent, onClose, onTaskComplete }) => {
-    const [terminalHistory, setTerminalHistory] = useState<string[]>([`Welcome to the agent terminal for ${agent.hostname}.`]);
-    const [terminalInput, setTerminalInput] = useState('');
-    const [isTasking, setIsTasking] = useState(false);
-    const terminalEndRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [terminalHistory]);
-    
-    const handleCommand = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!terminalInput.trim()) return;
-
-        const command = terminalInput;
-        setTerminalHistory(prev => [...prev, `> ${command}`]);
-        setTerminalInput('');
-
-        const output = await c2Service.executeCommand(agent.id, command);
-        setTerminalHistory(prev => [...prev, output]);
-    };
-
-    const handleRunTask = async (task: 'credential_harvesting' | 'network_scan' | 'system_enum' | 'privesc_check') => {
-        setIsTasking(true);
-        setTerminalHistory(prev => [...prev, `[+] Tasking agent to run ${task}...`]);
-        try {
-            const newLoot = await c2Service.runTask(agent.id, task);
-            setTerminalHistory(prev => [...prev, `[+] Task completed. New loot collected: ${newLoot.type} - ${newLoot.source}`]);
-            onTaskComplete(newLoot);
-        } catch (error) {
-            setTerminalHistory(prev => [...prev, `[-] Task failed: ${error instanceof Error ? error.message : String(error)}`]);
-        } finally {
-            setIsTasking(false);
-        }
-    };
-
-    return (
-        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-8">
-            <div className="bg-background border border-border rounded-lg w-full h-full max-w-6xl flex flex-col shadow-2xl shadow-primary/20">
-                <div className="p-4 border-b border-border flex justify-between items-center">
-                    <h2 className="text-xl font-bold text-primary flex items-center gap-2"><CpuIcon/> Interact: {agent.hostname} ({agent.ip})</h2>
-                    <button onClick={onClose} className="p-1 hover:bg-border rounded-md"><XIcon className="w-6 h-6" /></button>
-                </div>
-                <div className="flex-1 flex overflow-hidden">
-                    <div className="w-1/3 border-r border-border p-4 space-y-2 overflow-y-auto">
-                        <h3 className="font-bold text-lg text-accent-orange">Agent Details</h3>
-                        <p className="text-sm"><strong>User:</strong> {agent.user} <span className={`font-bold text-xs ml-2 ${agent.privileges === 'Root' || agent.privileges === 'Admin' ? 'text-destructive' : 'text-accent-green'}`}>({agent.privileges})</span></p>
-                        <p className="text-sm"><strong>OS:</strong> {agent.osVersion}</p>
-                        <p className="text-sm"><strong>Internal IP:</strong> {agent.ip}</p>
-                        <p className="text-sm"><strong>External IP:</strong> {agent.externalIp}</p>
-                        <p className="text-sm"><strong>PID:</strong> {agent.pid}</p>
-                        <p className="text-sm"><strong>Process:</strong> {agent.processName}</p>
-                        <p className="text-sm"><strong>Injected Into:</strong> {agent.processInjectionTarget || 'N/A'}</p>
-                        
-                        <h3 className="font-bold text-lg text-accent-orange pt-4 mt-4 border-t border-border">Built-in Modules</h3>
-                        <div className="space-y-2">
-                            <button onClick={() => handleRunTask('credential_harvesting')} disabled={isTasking} className={`${secondaryButtonStyles} w-full text-sm`}><KeyRoundIcon className="w-4 h-4 mr-2"/> Harvest Credentials (Mimikatz)</button>
-                            <button onClick={() => handleRunTask('network_scan')} disabled={isTasking} className={`${secondaryButtonStyles} w-full text-sm`}><NetworkIcon className="w-4 h-4 mr-2"/> Enumerate Network</button>
-                            <button onClick={() => handleRunTask('system_enum')} disabled={isTasking} className={`${secondaryButtonStyles} w-full text-sm`}><ServerIcon className="w-4 h-4 mr-2"/> Enumerate System Info</button>
-                            <button onClick={() => handleRunTask('privesc_check')} disabled={isTasking} className={`${secondaryButtonStyles} w-full text-sm`}><ShieldIcon className="w-4 h-4 mr-2"/> Check Privesc Vectors</button>
-                        </div>
-                    </div>
-                    <div className="w-2/3 flex flex-col">
-                        <div ref={terminalEndRef} className="flex-1 p-4 font-mono text-sm overflow-y-auto bg-black/30">
-                            {terminalHistory.map((line, i) => <pre key={i}>{line}</pre>)}
-                        </div>
-                        <form onSubmit={handleCommand} className="p-2 border-t border-border flex gap-2">
-                            <span className="font-mono text-primary">&gt;</span>
-                            <input
-                                type="text"
-                                value={terminalInput}
-                                onChange={e => setTerminalInput(e.target.value)}
-                                className="flex-1 bg-transparent outline-none font-mono"
-                                placeholder="Enter command..."
-                                autoFocus
-                            />
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
 
 
 // --- Main App Component ---
@@ -584,24 +488,6 @@ export default function App() {
     });
     const [generatedShellcode, setGeneratedShellcode] = useState('// Your generated shellcode will appear here...');
 
-    // C2 State
-    const [listeners, setListeners] = useState<Listener[]>([]);
-    const [agents, setAgents] = useState<Agent[]>([]);
-    const [loot, setLoot] = useState<Loot[]>([]);
-    const [redirectors, setRedirectors] = useState<Redirector[]>([]);
-    const [agentBuildConfig, setAgentBuildConfig] = useState({
-        os: TargetOS.WINDOWS,
-        arch: 'x86_64',
-        listenerId: '',
-        payloadType: PayloadType.POWERSHELL,
-        executionModel: 'stageless' as 'staged' | 'stageless',
-        amsiBypass: true,
-        etwBypass: false,
-        persistence: false,
-    });
-    const [generatedAgentPayload, setGeneratedAgentPayload] = useState('// Your generated agent payload will appear here.');
-    const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-
     // Defend State
     const [siemConfig, setSiemConfig] = useState<SiemConfig>({ url: '', apiKey: '', connected: false });
     const [siemConfigInputs, setSiemConfigInputs] = useState({ url: '', apiKey: '' });
@@ -616,7 +502,7 @@ export default function App() {
 
     useEffect(() => {
         if (settingsTab === 'MCP_CONFIG') {
-            c2Service.getMcpConfig().then(config => {
+            getMcpConfig().then(config => {
                 setMcpConfig(config);
                 setMcpConfigInputs({
                     command: config.command,
@@ -635,7 +521,7 @@ export default function App() {
                 args: argsArray,
                 enabled: mcpConfig.enabled
             };
-            await c2Service.saveMcpConfig(newConfig);
+            await saveMcpConfig(newConfig);
             setMcpConfig(newConfig);
             showToast('MCP Configuration saved.');
         } catch (error) {
@@ -736,32 +622,10 @@ export default function App() {
     type ThreatHuntAnalysisTab = 'CODE' | 'LOG' | 'ANALYSIS';
     const [threatHuntAnalysisTab, setThreatHuntAnalysisTab] = useState<ThreatHuntAnalysisTab>('CODE');
 
-    // Offensive Infrastructure State
-    const [iacConfig, setIacConfig] = useState({
-        iacTool: CodeLanguage.TERRAFORM,
-        cloudProvider: CloudProvider.DO,
-        c2Domain: 'hvck.hvckthehills.com',
-        c2Framework: C2Framework.MYTHIC,
-        c2VmSize: VmSize.MEDIUM,
-        enableOverlay: true,
-        overlaySoftware: OverlaySoftware.NEBULA,
-        lighthouseVmSize: VmSize.SMALL,
-        enableInternalHttp: true,
-        internalHttpForwarder: ForwardingMethod.SOCAT,
-        enableInternalDns: true,
-        internalDnsForwarder: ForwardingMethod.SOCAT,
-        enableEdgeHttp: true,
-        edgeHttpProxy: ReverseProxy.NGINX,
-        edgeHttpSsl: "Let's Encrypt",
-        edgeHttpRedirectUrl: 'https://hvckthehills.com',
-        enableEdgeDns: true,
-    });
-
     // Platform State
     const [users, setUsers] = useState<User[]>(MOCK_USERS);
     const [currentUser, setCurrentUser] = useState<User>(MOCK_USERS[0]);
     const [eventLog, setEventLog] = useState<EventLog[]>([]);
-    const [lootFilter, setLootFilter] = useState({ agentId: '', type: '' });
     const [generatedReport, setGeneratedReport] = useState('');
     const [platformSettings, setPlatformSettings] = useState({
         defaultLLM: { provider: LLMProvider.ANTHROPIC, model: 'claude-sonnet-4-6' },
@@ -928,62 +792,18 @@ export default function App() {
       setOpenDropdown(prev => prev === name ? null : name);
     };
 
-    // --- Data Fetching from C2 Service ---
-    const refreshListeners = useCallback(() => c2Service.getListeners().then(setListeners), []);
-    const refreshAgents = useCallback(() => c2Service.getAgents().then(setAgents), []);
-    const refreshLoot = useCallback(() => c2Service.getLoot().then(setLoot), []);
-    const refreshRedirectors = useCallback(() => c2Service.getRedirectors().then(setRedirectors), []);
+    // --- Data Fetching ---
     const refreshSiemConfig = useCallback(() => {
-        c2Service.getSiemConfig().then(config => {
+        getSiemConfig().then(config => {
             setSiemConfig(config);
             setSiemConfigInputs({ url: config.url, apiKey: config.apiKey });
         });
     }, []);
-    const refreshSiemRules = useCallback(() => c2Service.getSiemRules().then(setSiemRules), []);
+    const refreshSiemRules = useCallback(() => getSiemRules().then(setSiemRules), []);
 
     useEffect(() => {
         loadCustomLLMConfig();
     }, [loadCustomLLMConfig]);
-
-    useEffect(() => {
-        refreshListeners();
-        refreshAgents();
-        refreshLoot();
-        refreshRedirectors();
-        refreshSiemConfig();
-
-        // Socket.IO Event Listeners
-        const handleNewAgent = (newAgent: Agent) => {
-            setAgents(prev => [newAgent, ...prev]);
-            showToast(`New agent connected: ${newAgent.hostname}`);
-            logEvent('Agent Check-in', `New agent ${newAgent.hostname} connected.`);
-        };
-
-        const handleAgentStatusChange = (updatedAgent: Agent) => {
-            setAgents(prev => prev.map(a => a.id === updatedAgent.id ? updatedAgent : a));
-        };
-
-        const handleNewLoot = (newLoot: Loot) => {
-            setLoot(prev => [newLoot, ...prev]);
-            showToast(`New loot received from agent.`);
-            logEvent('Loot Received', `Type: ${newLoot.type}`);
-        };
-
-        c2Service.on('new_agent', handleNewAgent);
-        c2Service.on('agent_status_change', handleAgentStatusChange);
-        c2Service.on('new_loot', handleNewLoot);
-
-        const intervalId = setInterval(() => {
-            refreshAgents();
-        }, 30000); // Poll less frequently now that we have sockets (fallback)
-
-        return () => {
-            clearInterval(intervalId);
-            c2Service.off('new_agent', handleNewAgent);
-            c2Service.off('agent_status_change', handleAgentStatusChange);
-            c2Service.off('new_loot', handleNewLoot);
-        };
-    }, [refreshAgents, refreshSiemConfig, refreshRedirectors, refreshLoot, refreshListeners, logEvent]);
 
     useEffect(() => {
         if (activeView === 'DEFEND' && defendTab === 'SIEM') {
@@ -1036,34 +856,6 @@ export default function App() {
         initMonaco();
     }, []);
 
-    const [isListenerModalOpen, setIsListenerModalOpen] = useState(false);
-    const [newListener, setNewListener] = useState<Omit<Listener, 'id' | 'status'>>({ name: '', type: 'HTTP', host: '0.0.0.0', port: 80, redirectorId: '', jitterMin: 0, jitterMax: 5, hostHeader: '' });
-    
-    const [isRedirectorModalOpen, setIsRedirectorModalOpen] = useState(false);
-    const [newRedirector, setNewRedirector] = useState<Omit<Redirector, 'id' | 'status'>>({ name: '', type: 'HTTP/S', ip: '', tier: 'Edge' });
-
-    useEffect(() => {
-      if (!agentBuildConfig.listenerId && listeners.length > 0) {
-          setAgentBuildConfig(p => ({ ...p, listenerId: listeners[0].id }));
-      }
-    }, [listeners, agentBuildConfig.listenerId]);
-
-    const handleCreateListener = async () => {
-        await c2Service.createListener(newListener);
-        logEvent('Listener Created', `Name: ${newListener.name}, Type: ${newListener.type}, Host: ${newListener.host}:${newListener.port}`);
-        setIsListenerModalOpen(false);
-        setNewListener({ name: '', type: 'HTTP', host: '0.0.0.0', port: 80 });
-        refreshListeners();
-    };
-    
-    const handleCreateRedirector = async () => {
-        await c2Service.createRedirector(newRedirector);
-        logEvent('Redirector Created', `Name: ${newRedirector.name}, IP: ${newRedirector.ip}`);
-        setIsRedirectorModalOpen(false);
-        setNewRedirector({ name: '', type: 'HTTP/S', ip: '', tier: 'Edge' });
-        refreshRedirectors();
-    };
-
     const getModelForTask = useCallback((attackType?: AttackType): string => {
         if (!currentUser) return 'claude-sonnet-4-6'; // Fallback
         if (attackType && currentUser.granularLLMConfig[attackType]) {
@@ -1077,49 +869,6 @@ export default function App() {
         return currentUser.platformLLMConfig.model;
     }, [currentUser]);
 
-    const handleGenerateAgentPayload = async () => {
-        const selectedListener = listeners.find(l => l.id === agentBuildConfig.listenerId);
-        if (!selectedListener) {
-            showToast("Error: Please create and select a listener first.", 'error');
-            return;
-        }
-        
-        setIsLoading(true);
-        setLoadingMessage('Generating agent payload...');
-        logEvent('Agent Generation Started', `Format: ${agentBuildConfig.payloadType}, Listener: ${selectedListener.name}`);
-    
-        const agentParams: GenerationParams = {
-            objective: `Create a beaconing agent that connects back to ${selectedListener.host}:${selectedListener.port} for C2 communications. It should be stealthy and memory-resident if possible. Evasion: AMSI Bypass=${agentBuildConfig.amsiBypass}, ETW Bypass=${agentBuildConfig.etwBypass}. Execution: ${agentBuildConfig.executionModel}.`,
-            attackType: AttackType.INITIAL_ACCESS,
-            language: agentBuildConfig.payloadType as unknown as CodeLanguage, // Map this better if needed
-            target: {
-                os: agentBuildConfig.os as TargetOS,
-                version: OS_VERSIONS[agentBuildConfig.os as TargetOS][0],
-                architecture: agentBuildConfig.arch,
-            },
-        };
-    
-        try {
-            const model = getModelForTask(agentParams.attackType);
-            const code = await generateCode(agentParams, model);
-            setGeneratedAgentPayload(code);
-            showToast("Agent payload generated. Simulating check-in...");
-            // Simulate agent check-in
-            c2Service.simulateNewAgent(selectedListener.id, agentBuildConfig.os.toLowerCase() as Agent['os']).then(newAgent => {
-                showToast(`New agent checked in: ${newAgent.hostname}`);
-                refreshAgents();
-                logEvent('Agent Check-in', `New agent ${newAgent.hostname} connected.`);
-            });
-        } catch (error) {
-            console.error("Agent generation error:", error);
-            setGeneratedAgentPayload(`// Agent generation failed.`);
-            logEvent('Agent Generation Failed', error instanceof Error ? error.message : String(error));
-            showToast("Agent generation failed.", 'error');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-    
     // --- API Handlers ---
     const handleGenerateCode = useCallback(async () => {
         setIsLoading(true);
@@ -1431,31 +1180,17 @@ export default function App() {
 
     const handleGenerateReport = () => {
         logEvent('Report Generated', 'Operation summary report created.');
-        let report = `# Imperium C2 Operation Report\n\n**Generated on:** ${new Date().toLocaleString()}\n\n`;
-    
-        report += `## 1. Executive Summary\n\nThis report summarizes the activities conducted during the operation. A total of **${agents.length} agents** were deployed, **${loot.length} items** of loot were collected, and **${eventLog.length} operator actions** were logged.\n\n`;
-    
-        report += `## 2. Compromised Systems (Agents)\n\n`;
-        report += `| Hostname | User | IP Address | OS | Status |\n`;
-        report += `|---|---|---|---|---|\n`;
-        agents.forEach(a => {
-            report += `| ${a.hostname} | ${a.user} | ${a.ip} | ${a.osVersion} | ${a.status} |\n`;
-        });
-    
-        report += `\n## 3. Collected Loot\n\n`;
-        report += `| Type | Source | Agent | Timestamp |\n`;
-        report += `|---|---|---|---|\n`;
-        loot.forEach(l => {
-            report += `| ${l.type} | ${l.source} | ${agents.find(a => a.id === l.agentId)?.hostname || l.agentId} | ${new Date(l.timestamp).toLocaleString()} |\n`;
-        });
-    
-        report += `\n## 4. Operator Activity Log\n\n`;
+        let report = `# Imperium Operation Report\n\n**Generated on:** ${new Date().toLocaleString()}\n\n`;
+
+        report += `## 1. Executive Summary\n\nThis report summarizes the activities conducted during the operation. A total of **${eventLog.length} operator actions** were logged.\n\n`;
+
+        report += `\n## 2. Operator Activity Log\n\n`;
         report += `| Timestamp | Operator | Action | Details |\n`;
         report += `|---|---|---|---|\n`;
         [...eventLog].reverse().forEach(e => {
             report += `| ${new Date(e.timestamp).toLocaleString()} | ${e.operator} | ${e.action} | ${e.details.substring(0, 100)} |\n`;
         });
-        
+
         setGeneratedReport(report);
         showToast('Operation report generated successfully.');
     };
@@ -1505,7 +1240,7 @@ export default function App() {
         setIsLoading(true);
         setLoadingMessage('Saving SIEM config...');
         try {
-            await c2Service.saveSiemConfig({ ...siemConfigInputs, connected: siemConfig.connected });
+            await saveSiemConfig({ ...siemConfigInputs, connected: siemConfig.connected });
             showToast('SIEM configuration saved.');
             refreshSiemConfig();
         } catch (error) {
@@ -1520,20 +1255,20 @@ export default function App() {
         setLoadingMessage('Testing SIEM connection...');
         try {
             // FIX: Argument of type '{ url: string; apiKey: string; }' is not assignable to parameter of type 'SiemConfig'. Property 'connected' is missing. Add 'connected: false' to satisfy the type.
-            const result = await c2Service.testSiemConnection({ ...siemConfigInputs, connected: false });
+            const result = await testSiemConnection({ ...siemConfigInputs, connected: false });
             if (result.success) {
-                await c2Service.saveSiemConfig({ ...siemConfigInputs, connected: true });
+                await saveSiemConfig({ ...siemConfigInputs, connected: true });
                 refreshSiemConfig();
                 showToast(result.message);
             } else {
-                 await c2Service.saveSiemConfig({ ...siemConfigInputs, connected: false });
+                 await saveSiemConfig({ ...siemConfigInputs, connected: false });
                 refreshSiemConfig();
                 showToast(result.message, 'error');
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : 'An unknown error occurred.';
             showToast(message, 'error');
-            await c2Service.saveSiemConfig({ ...siemConfigInputs, connected: false });
+            await saveSiemConfig({ ...siemConfigInputs, connected: false });
             refreshSiemConfig();
         } finally {
             setIsLoading(false);
@@ -1582,7 +1317,7 @@ export default function App() {
         setLoadingMessage('Querying SIEM...');
         setSiemQueryResults([]);
         try {
-            const results = await c2Service.querySiem(siemQuery);
+            const results = await querySiem(siemQuery);
             setSiemQueryResults(results);
             if (results.length === 0) {
                 showToast('Query returned no results.', 'success');
@@ -1596,7 +1331,7 @@ export default function App() {
 
     const handleToggleSiemRule = useCallback(async (ruleId: string) => {
         try {
-            await c2Service.toggleSiemRule(ruleId);
+            await toggleSiemRule(ruleId);
             refreshSiemRules(); // refresh the list
             showToast('Rule status updated.');
         } catch (error) {
@@ -1747,7 +1482,7 @@ export default function App() {
         setIsLoading(true);
         setLoadingMessage('Submitting query to SIEM...');
         try {
-            const response = await c2Service.submitDslQuery(siemSubmitState.dslQuery);
+            const response = await submitDslQuery(siemSubmitState.dslQuery);
             setSiemSubmitState(prev => ({
                 ...prev,
                 step: 'SHOW_RESPONSE',
@@ -1918,56 +1653,6 @@ export default function App() {
     }, [threatHuntVaultItemName, threatHuntGenerationParams, threatHuntCode, logEvent]);
 
 
-    const handlePrepareIacPlan = useCallback(() => {
-        let objective = `You are an expert in DevOps and offensive security infrastructure. Your task is to generate a complete Infrastructure as Code script in ${iacConfig.iacTool} for ${iacConfig.cloudProvider} based on the following detailed specification. The script must automate the deployment of a resilient, multi-layered C2 infrastructure.\n\n`;
-        
-        objective += `--- Overall Configuration ---\n`;
-        objective += `- **C2 Domain:** ${iacConfig.c2Domain}\n\n`;
-
-        if (iacConfig.c2Framework === C2Framework.IMPERIUM) {
-            objective += `The C2 server is this Imperium platform. DO NOT generate resources for the C2 server itself. The infrastructure should be built to support it, with redirectors forwarding traffic to an endpoint managed by the user.\n\n`;
-        } else {
-            objective += `**C2 Server**\n- **C2 Framework:** ${iacConfig.c2Framework}\n- **VM Size:** ${iacConfig.c2VmSize}\n\n`;
-        }
-
-        if (iacConfig.enableOverlay) {
-            objective += `**Secure Overlay Network (${iacConfig.overlaySoftware})**\n- A Lighthouse/coordination node should be deployed on a ${iacConfig.lighthouseVmSize} VM.\n- All subsequent nodes (C2, redirectors) must be part of this secure overlay network.\n\n`;
-        }
-
-        objective += `**Redirectors**\n`;
-        if (iacConfig.enableEdgeHttp) {
-            objective += `- **HTTP/S Edge Redirector:** Use ${iacConfig.edgeHttpProxy} to reverse proxy traffic. Obtain a ${iacConfig.edgeHttpSsl} certificate. Redirect non-C2 traffic to ${iacConfig.edgeHttpRedirectUrl}. Forward valid C2 traffic to the internal HTTP redirector.\n`;
-        }
-        if (iacConfig.enableInternalHttp) {
-            objective += `- **Internal HTTP/S Redirector:** Use ${iacConfig.internalHttpForwarder} to forward traffic from the edge to the C2 server over the overlay network.\n`;
-        }
-        if (iacConfig.enableEdgeDns) {
-            objective += `- **DNS Edge Redirector:** Forward incoming DNS requests to the internal DNS redirector.\n`;
-        }
-        if (iacConfig.enableInternalDns) {
-            objective += `- **Internal DNS Redirector:** Use ${iacConfig.internalDnsForwarder} to forward DNS traffic to the C2 server over the overlay network.\n\n`;
-        }
-
-        objective += `Provide the complete, functional ${iacConfig.iacTool} code.`;
-
-        setParams({
-            objective: objective,
-            attackType: AttackType.INFRASTRUCTURE_AS_CODE,
-            language: iacConfig.iacTool,
-            target: { os: TargetOS.LINUX, version: 'Ubuntu 22.04', architecture: 'x86_64' }
-        });
-        
-        setActiveView('WEAPONIZATION');
-        showToast('IaC plan sent to Weaponization workbench.');
-        
-    }, [iacConfig]);
-
-    const filteredLoot = useMemo(() => {
-        return loot
-            .filter(l => !lootFilter.agentId || l.agentId === lootFilter.agentId)
-            .filter(l => !lootFilter.type || l.type === lootFilter.type);
-    }, [loot, lootFilter]);
-
     const ROLES_HIERARCHY: Record<UserRole, number> = {
         [UserRole.USER]: 1,
         [UserRole.ADMIN]: 2,
@@ -2049,48 +1734,6 @@ export default function App() {
                     </div>
                 ))}
             </div>
-            {isListenerModalOpen && (
-                <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
-                    <div className="bg-black/50 border border-border rounded-lg p-6 w-full max-w-lg shadow-2xl shadow-primary/20">
-                        <h2 className="text-xl font-bold text-primary mb-4">Create New Listener</h2>
-                        <div className="space-y-4">
-                            <input type="text" placeholder="Listener Name" value={newListener.name} onChange={e => setNewListener(p => ({...p, name: e.target.value}))} className={baseInputStyles} />
-                            <div className="grid grid-cols-2 gap-4">
-                                <div><label className="text-xs font-bold text-muted-foreground">PROTOCOL</label><div className="relative"><select value={newListener.type} onChange={e => setNewListener(p => ({...p, type: e.target.value as Listener['type']}))} className={baseSelectStyles}>{['HTTP', 'HTTPS', 'TCP', 'SMB', 'DNS', 'mTLS', 'QUIC', 'Reverse TCP'].map(t => <option key={t}>{t}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div>
-                                <div><label className="text-xs font-bold text-muted-foreground">BIND TO REDIRECTOR</label><div className="relative"><select value={newListener.redirectorId} onChange={e => setNewListener(p => ({...p, redirectorId: e.target.value}))} className={baseSelectStyles}><option value="">Direct C2 Bind</option>{redirectors.map(r => <option key={r.id} value={r.id}>{r.name} ({r.ip})</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div><label className="text-xs font-bold text-muted-foreground">BIND HOST</label><input type="text" placeholder="Host" value={newListener.host} onChange={e => setNewListener(p => ({...p, host: e.target.value}))} className={baseInputStyles} /></div>
-                                <div><label className="text-xs font-bold text-muted-foreground">BIND PORT</label><input type="number" placeholder="Port" value={newListener.port} onChange={e => setNewListener(p => ({...p, port: Number(e.target.value)}))} className={baseInputStyles} /></div>
-                            </div>
-                             <div><label className="text-xs font-bold text-muted-foreground">HOST HEADER / DOMAIN FRONT</label><input type="text" placeholder="e.g., www.google.com" value={newListener.hostHeader} onChange={e => setNewListener(p => ({...p, hostHeader: e.target.value}))} className={baseInputStyles} /></div>
-                        </div>
-                        <div className="mt-6 flex gap-4">
-                            <button onClick={() => setIsListenerModalOpen(false)} className={secondaryButtonStyles}>Cancel</button>
-                            <button onClick={handleCreateListener} className={primaryButtonStyles}>Create</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-            
-            {isRedirectorModalOpen && (
-                 <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
-                    <div className="bg-black/50 border border-border rounded-lg p-6 w-full max-w-md shadow-2xl shadow-primary/20">
-                        <h2 className="text-xl font-bold text-primary mb-4">Create New Redirector</h2>
-                        <div className="space-y-4">
-                            <input type="text" placeholder="Redirector Name" value={newRedirector.name} onChange={e => setNewRedirector(p => ({...p, name: e.target.value}))} className={baseInputStyles} />
-                            <div className="relative"><select value={newRedirector.type} onChange={e => setNewRedirector(p => ({...p, type: e.target.value as Redirector['type']}))} className={baseSelectStyles}><option>HTTP/S</option><option>DNS</option><option>TCP</option><option>SMB</option></select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" /></div>
-                            <div className="relative"><select value={newRedirector.tier} onChange={e => setNewRedirector(p => ({...p, tier: e.target.value as Redirector['tier']}))} className={baseSelectStyles}><option>Edge</option><option>Internal</option></select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" /></div>
-                            <input type="text" placeholder="IP Address" value={newRedirector.ip} onChange={e => setNewRedirector(p => ({...p, ip: e.target.value}))} className={baseInputStyles} />
-                        </div>
-                        <div className="mt-6 flex gap-4">
-                            <button onClick={() => setIsRedirectorModalOpen(false)} className={secondaryButtonStyles}>Cancel</button>
-                            <button onClick={handleCreateRedirector} className={primaryButtonStyles}>Create</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-            
             {isUserModalOpen && selectedUserForEditing && (
                 <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50">
                     <div className="bg-black/50 border border-border rounded-lg p-6 w-full max-w-2xl shadow-2xl shadow-primary/20 flex flex-col max-h-[90vh]">
@@ -2112,10 +1755,8 @@ export default function App() {
                             <div className="border border-border rounded-lg p-4 space-y-3">
                                 <h3 className="text-sm font-bold text-primary">Permissions</h3>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedUserForEditing.permissions.c2Access} onChange={e => setSelectedUserForEditing(p => p ? ({...p, permissions: {...p.permissions, c2Access: e.target.checked}}) : null)} className="accent-primary"/> C2 Access</label>
                                     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedUserForEditing.permissions.reconAccess} onChange={e => setSelectedUserForEditing(p => p ? ({...p, permissions: {...p.permissions, reconAccess: e.target.checked}}) : null)} className="accent-primary"/> Recon Access</label>
                                     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedUserForEditing.permissions.attackPlanningAccess} onChange={e => setSelectedUserForEditing(p => p ? ({...p, permissions: {...p.permissions, attackPlanningAccess: e.target.checked}}) : null)} className="accent-primary"/> Attack Planning Access</label>
-                                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedUserForEditing.permissions.agentBuilderAccess} onChange={e => setSelectedUserForEditing(p => p ? ({...p, permissions: {...p.permissions, agentBuilderAccess: e.target.checked}}) : null)} className="accent-primary"/> Agent Builder Access</label>
                                     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedUserForEditing.permissions.userManagementAccess} onChange={e => setSelectedUserForEditing(p => p ? ({...p, permissions: {...p.permissions, userManagementAccess: e.target.checked}}) : null)} className="accent-primary"/> User Management</label>
                                     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selectedUserForEditing.permissions.settingsAccess} onChange={e => setSelectedUserForEditing(p => p ? ({...p, permissions: {...p.permissions, settingsAccess: e.target.checked}}) : null)} className="accent-primary"/> Settings Access</label>
                                 </div>
@@ -2152,8 +1793,6 @@ export default function App() {
                     </div>
                 </div>
             )}
-            
-            {selectedAgent && <AgentInteractionModal agent={selectedAgent} onClose={() => setSelectedAgent(null)} onTaskComplete={(newLoot) => { refreshLoot(); showToast(`New loot collected!`); }} />}
             
             {siemSubmitState.isOpen && (
                  <div className="absolute inset-0 bg-background/80 backdrop-blur-sm flex items-center justify-center z-50 p-8">
@@ -2266,27 +1905,6 @@ export default function App() {
                             </div>
                         )}
                     </div>
-
-                    {currentUser.permissions.c2Access && (
-                        <div ref={c2Ref} className="relative">
-                            <button onClick={() => toggleDropdown('C2 Operations')} className={`flex items-center gap-2 font-semibold px-3 py-2 rounded-md hover:bg-border transition-colors ${openDropdown === 'C2 Operations' ? 'bg-border' : ''}`}>
-                                <ServerIcon className="w-5 h-5 text-accent-orange"/> C2 Operations
-                                <ChevronDownIcon className={`w-4 h-4 transition-transform ${openDropdown === 'C2 Operations' ? 'rotate-180' : ''}`} />
-                            </button>
-                            {openDropdown === 'C2 Operations' && (
-                                <div className="absolute top-full left-0 mt-2 w-64 bg-background border border-border rounded-lg p-2 z-50 shadow-lg shadow-orange-500/10 space-y-1">
-                                    <button onClick={() => {setActiveView('OFFENSIVE_INFRA'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'OFFENSIVE_INFRA' ? 'bg-primary/20 text-primary' : ''}`}><NetworkIcon className="w-4 h-4" /> Offensive Infra (IaC)</button>
-                                    {/* Hidden menu items - uncomment when ready
-                                    <button onClick={() => {setActiveView('REDIRECTORS'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'REDIRECTORS' ? 'bg-primary/20 text-primary' : ''}`}><ServerIcon className="w-4 h-4" /> Redirectors</button>
-                                    <button onClick={() => {setActiveView('LISTENERS'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'LISTENERS' ? 'bg-primary/20 text-primary' : ''}`}><ActivityIcon className="w-4 h-4" /> Listeners</button>
-                                    <button onClick={() => {setActiveView('AGENTS'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'AGENTS' ? 'bg-primary/20 text-primary' : ''}`}><UsersIcon className="w-4 h-4" /> Agents</button>
-                                    <button onClick={() => {setActiveView('LOOT'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'LOOT' ? 'bg-primary/20 text-primary' : ''}`}><DatabaseIcon className="w-4 h-4" /> Loot</button>
-                                    {currentUser.permissions.agentBuilderAccess && <button onClick={() => {setActiveView('AGENT_BUILDER'); setOpenDropdown(null);}} className={`w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-accent ${activeView === 'AGENT_BUILDER' ? 'bg-primary/20 text-primary' : ''}`}><PackageIcon className="w-4 h-4" /> Agent Builder</button>}
-                                    */}
-                                </div>
-                            )}
-                        </div>
-                    )}
 
                     <div ref={platformRef} className="relative">
                         <button onClick={() => toggleDropdown('Platform')} className={`flex items-center gap-2 font-semibold px-3 py-2 rounded-md hover:bg-border transition-colors ${openDropdown === 'Platform' ? 'bg-border' : ''}`}>
@@ -2507,166 +2125,6 @@ export default function App() {
                            <div className="flex-1 overflow-hidden">{isEditorReady ? <CodeEditor value={chainedCode} onChange={setChainedCode} onFileDrop={()=>{}} language={MONACO_LANGUAGE_MAP[params.language]} /> : <Loader message="Loading Editor..." />}</div>
                         </div>
                      </div>
-                )}
-                {activeView === 'REDIRECTORS' && (
-                    <div className="bg-black/30 border border-border rounded-lg flex flex-col h-full">
-                        <div className="p-4 border-b border-border flex justify-between items-center">
-                            <h2 className="text-xl font-bold text-primary flex items-center gap-2"><ServerIcon/> Redirector Management</h2>
-                            <button onClick={() => setIsRedirectorModalOpen(true)} className="flex items-center gap-2 bg-primary text-primary-foreground text-sm font-bold py-2 px-3 rounded-md hover:bg-opacity-80 transition-all duration-300"><PlusIcon className="w-4 h-4" /> New Redirector</button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="sticky top-0 bg-background"><tr className="border-b border-border"><th className="p-3">Name</th><th className="p-3">IP Address</th><th className="p-3">Type</th><th className="p-3">Tier</th><th className="p-3">Status</th><th className="p-3">Actions</th></tr></thead>
-                                <tbody>
-                                    {redirectors.map(r => (
-                                        <tr key={r.id} className="border-b border-border hover:bg-accent/50">
-                                            <td className="p-3 font-mono">{r.name}</td>
-                                            <td className="p-3 font-mono">{r.ip}</td>
-                                            <td className="p-3 font-mono">{r.type}</td>
-                                            <td className="p-3 font-mono">{r.tier}</td>
-                                            <td className={`p-3 font-bold ${r.status === 'Healthy' ? 'text-accent-green' : r.status === 'Degraded' ? 'text-accent-orange' : 'text-destructive'}`}>{r.status.toUpperCase()}</td>
-                                            <td className="p-3"><button className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded hover:bg-red-500/40" onClick={() => c2Service.deleteRedirector(r.id).then(refreshRedirectors)}>Delete</button></td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-                {activeView === 'LISTENERS' && (
-                    <div className="bg-black/30 border border-border rounded-lg flex flex-col h-full">
-                        <div className="p-4 border-b border-border flex justify-between items-center">
-                            <h2 className="text-xl font-bold text-primary flex items-center gap-2"><ActivityIcon/> Listener Management</h2>
-                            <button onClick={() => setIsListenerModalOpen(true)} className="flex items-center gap-2 bg-primary text-primary-foreground text-sm font-bold py-2 px-3 rounded-md hover:bg-opacity-80 transition-all duration-300"><PlusIcon className="w-4 h-4" /> New Listener</button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="sticky top-0 bg-background">
-                                    <tr className="border-b border-border">
-                                        <th className="p-3">Name</th><th className="p-3">Type</th><th className="p-3">Bind To</th><th className="p-3">Host:Port</th><th className="p-3">Status</th><th className="p-3">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {listeners.map(l => (
-                                        <tr key={l.id} className="border-b border-border hover:bg-accent/50">
-                                            <td className="p-3 font-mono">{l.name}</td>
-                                            <td className="p-3 font-mono">{l.type}</td>
-                                            <td className="p-3 font-mono">{redirectors.find(r => r.id === l.redirectorId)?.name || 'Direct C2'}</td>
-                                            <td className="p-3 font-mono">{l.host}:{l.port}</td>
-                                            <td className={`p-3 font-bold ${l.status === 'active' ? 'text-accent-green' : 'text-muted-foreground'}`}>{l.status.toUpperCase()}</td>
-                                            <td className="p-3">
-                                                <div className="flex gap-2">
-                                                    <button className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded hover:bg-green-500/40" onClick={() => c2Service.toggleListenerStatus(l.id, 'active').then(refreshListeners)}>Start</button>
-                                                    <button className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded hover:bg-yellow-500/40" onClick={() => c2Service.toggleListenerStatus(l.id, 'inactive').then(refreshListeners)}>Stop</button>
-                                                    <button className="text-xs bg-red-500/20 text-red-400 px-2 py-1 rounded hover:bg-red-500/40" onClick={() => c2Service.deleteListener(l.id).then(refreshListeners)}>Delete</button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-                {activeView === 'AGENTS' && (
-                    <div className="bg-black/30 border border-border rounded-lg flex flex-col h-full">
-                        <div className="p-4 border-b border-border">
-                            <h2 className="text-xl font-bold text-primary flex items-center gap-2"><UsersIcon/> Agent Management</h2>
-                        </div>
-                         <div className="flex-1 overflow-y-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="sticky top-0 bg-background">
-                                    <tr className="border-b border-border"><th className="p-3">OS</th><th className="p-3">Hostname</th><th className="p-3">User@IP</th><th className="p-3">Privileges</th><th className="p-3">Listener</th><th className="p-3">Last Seen</th><th className="p-3">Status</th></tr>
-                                </thead>
-                                <tbody>
-                                    {agents.length > 0 ? agents.map(a => (
-                                        <tr key={a.id} className="border-b border-border hover:bg-accent/50 cursor-pointer" onClick={() => setSelectedAgent(a)}>
-                                            <td className="p-3">{a.os}</td><td className="p-3">{a.hostname}</td><td className="p-3">{a.user}@{a.ip}</td><td className="p-3 font-semibold">{a.privileges}</td><td className="p-3">{a.listener}</td><td className="p-3">{new Date(a.lastSeen).toLocaleString()}</td>
-                                            <td className={`p-3 font-bold ${a.status === 'active' ? 'text-accent-green' : a.status === 'stale' ? 'text-accent-orange' : 'text-destructive'}`}>{a.status.toUpperCase()}</td>
-                                        </tr>
-                                    )) : (
-                                        <tr>
-                                            <td colSpan={7} className="text-center p-8 text-muted-foreground">
-                                                No agents have checked in. Deploy an agent payload on a target system.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-                 {activeView === 'LOOT' && (
-                    <div className="bg-black/30 border border-border rounded-lg flex flex-col h-full">
-                        <div className="p-4 border-b border-border flex gap-4 items-center">
-                            <h2 className="text-xl font-bold text-primary flex items-center gap-2"><DatabaseIcon/> Loot Collection</h2>
-                            <div className="flex gap-2 ml-auto">
-                                <div className="relative"><select value={lootFilter.agentId} onChange={e => setLootFilter(p => ({ ...p, agentId: e.target.value }))} className={`${baseSelectStyles} w-48`}><option value="">All Agents</option>{agents.map(a => <option key={a.id} value={a.id}>{a.hostname}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div>
-                                <div className="relative"><select value={lootFilter.type} onChange={e => setLootFilter(p => ({ ...p, type: e.target.value }))} className={`${baseSelectStyles} w-48`}><option value="">All Types</option><option value="credential">Credential</option><option value="file">File</option><option value="screenshot">Screenshot</option><option value="keystrokes">Keystrokes</option><option value="browser_artefacts">Browser Artefacts</option><option value="network_data">Network Data</option><option value="system_output">System Output</option></select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div>
-                            </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="sticky top-0 bg-background"><tr className="border-b border-border"><th className="p-3">Agent</th><th className="p-3">Type</th><th className="p-3">Source</th><th className="p-3">Content</th><th className="p-3">Timestamp</th></tr></thead>
-                                <tbody>
-                                     {filteredLoot.length > 0 ? filteredLoot.map(l => (
-                                        <tr key={l.id} className="border-b border-border hover:bg-accent/50">
-                                            <td className="p-3 font-mono">{agents.find(a => a.id === l.agentId)?.hostname || l.agentId}</td><td className="p-3 font-mono">{l.type.replace('_',' ')}</td><td className="p-3 font-mono">{l.source}</td><td className="p-3 font-mono max-w-sm truncate">{l.content}</td><td className="p-3 font-mono">{new Date(l.timestamp).toLocaleString()}</td>
-                                        </tr>
-                                    )) : (
-                                        <tr>
-                                            <td colSpan={5} className="text-center p-8 text-muted-foreground">
-                                                No loot has been collected. Task an agent to gather intelligence.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-                {activeView === 'AGENT_BUILDER' && (
-                    <div className="bg-black/30 border border-border rounded-lg flex flex-col h-full">
-                        <div className="p-4 border-b border-border">
-                            <h2 className="text-xl font-bold text-primary flex items-center gap-2"><PackageIcon/> Agent Builder</h2>
-                        </div>
-                        <div className="flex-1 p-4 grid grid-cols-3 gap-4">
-                            <div className="col-span-1 space-y-4 overflow-y-auto pr-2">
-                                <div><label className="text-xs font-bold text-muted-foreground">PAYLOAD TYPE</label><div className="relative"><select value={agentBuildConfig.payloadType} onChange={e => setAgentBuildConfig(p => ({...p, payloadType: e.target.value as PayloadType}))} className={baseSelectStyles}>{Object.values(PayloadType).map(pt => <option key={pt} value={pt}>{pt}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div>
-                                <div><label className="text-xs font-bold text-muted-foreground">LISTENER</label><div className="relative"><select value={agentBuildConfig.listenerId} onChange={e => setAgentBuildConfig(p => ({...p, listenerId: e.target.value}))} className={baseSelectStyles} disabled={listeners.length === 0}>{listeners.length > 0 ? listeners.map(l => <option key={l.id} value={l.id}>{l.name}</option>) : <option>Create a listener first</option>}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div>
-                                <fieldset className="border border-border p-3 rounded-lg"><legend className="px-2 text-sm font-bold">Build Target</legend><div className="space-y-4 pt-2"><div><label className="text-xs font-bold text-muted-foreground">OPERATING SYSTEM</label><div className="relative"><select value={agentBuildConfig.os} onChange={e => setAgentBuildConfig(p => ({...p, os: e.target.value as TargetOS}))} className={baseSelectStyles}>{Object.values(TargetOS).map(os => <option key={os}>{os}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div><div><label className="text-xs font-bold text-muted-foreground">ARCHITECTURE</label><div className="relative"><select value={agentBuildConfig.arch} onChange={e => setAgentBuildConfig(p => ({...p, arch: e.target.value}))} className={baseSelectStyles}><option>x86_64</option><option>x86</option><option>ARM</option></select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div><div><label className="text-xs font-bold text-muted-foreground">EXECUTION MODEL</label><div className="relative"><select value={agentBuildConfig.executionModel} onChange={e => setAgentBuildConfig(p => ({...p, executionModel: e.target.value as any}))} className={baseSelectStyles}><option>stageless</option><option>staged</option></select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div></div></fieldset>
-                                <fieldset className="border border-border p-3 rounded-lg"><legend className="px-2 text-sm font-bold">Evasion & Capabilities</legend><div className="space-y-2 pt-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={agentBuildConfig.amsiBypass} onChange={e => setAgentBuildConfig(p => ({ ...p, amsiBypass: e.target.checked }))} className="accent-primary w-4 h-4"/>AMSI/ETW Bypass</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={agentBuildConfig.etwBypass} onChange={e => setAgentBuildConfig(p => ({ ...p, etwBypass: e.target.checked }))} className="accent-primary w-4 h-4"/>Encrypted Configuration</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={agentBuildConfig.persistence} onChange={e => setAgentBuildConfig(p => ({ ...p, persistence: e.target.checked }))} className="accent-primary w-4 h-4"/>Add Persistence</label></div></fieldset>
-                                <button onClick={handleGenerateAgentPayload} className={`${primaryButtonStyles} mt-auto`} disabled={listeners.length === 0}>Generate Payload</button>
-                            </div>
-                            <div className="col-span-2 bg-input rounded-md font-mono text-sm p-0 flex flex-col overflow-hidden">
-                                {isEditorReady ? <CodeEditor value={generatedAgentPayload} onChange={setGeneratedAgentPayload} onFileDrop={()=>{}} language={MONACO_LANGUAGE_MAP[agentBuildConfig.payloadType] || 'powershell'} readOnly /> : <Loader message="Loading Editor..." />}
-                            </div>
-                        </div>
-                    </div>
-                )}
-                 {activeView === 'OFFENSIVE_INFRA' && (
-                    <div className="bg-black/30 border border-border rounded-lg flex flex-col h-full">
-                        <div className="p-4 border-b border-border">
-                            <h2 className="text-xl font-bold text-primary flex items-center gap-2"><NetworkIcon/> Offensive Infrastructure (IaC) Planner</h2>
-                        </div>
-                        <div className="flex-1 p-6 w-full overflow-y-auto">
-                            <div className="max-w-6xl mx-auto space-y-6">
-                                <p className="text-sm text-muted-foreground">Design a multi-layered, secure, and disposable C2 infrastructure. The AI will generate an IaC plan to deploy this setup, which you can then review in the Weaponization workbench.</p>
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                    <div className="space-y-6">
-                                        <fieldset className="p-4 border border-border rounded-lg space-y-4 bg-input/30"><legend className="px-2 font-bold text-accent-green">Core Configuration</legend><div><label className="text-xs font-bold text-muted-foreground">IaC TOOL</label><div className="relative"><select value={iacConfig.iacTool} onChange={e => setIacConfig(p => ({...p, iacTool: e.target.value as CodeLanguage}))} className={baseSelectStyles}>{Object.values(CodeLanguage).filter(l => l === CodeLanguage.TERRAFORM || l === CodeLanguage.ANSIBLE).map(l => <option key={l} value={l}>{l}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div><div><label className="text-xs font-bold text-muted-foreground">CLOUD PROVIDER</label><div className="relative"><select value={iacConfig.cloudProvider} onChange={e => setIacConfig(p => ({...p, cloudProvider: e.target.value as CloudProvider}))} className={baseSelectStyles}>{Object.values(CloudProvider).map(c => <option key={c} value={c}>{c}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div><div><label className="text-xs font-bold text-muted-foreground">C2 DOMAIN</label><input type="text" value={iacConfig.c2Domain} onChange={e => setIacConfig(p => ({...p, c2Domain: e.target.value}))} className={baseInputStyles} /></div></fieldset>
-                                        <fieldset className="p-4 border border-border rounded-lg space-y-4 bg-input/30"><legend className="px-2 font-bold text-accent-green">C2 Server</legend><div className="grid grid-cols-2 gap-4"><div><label className="text-xs font-bold text-muted-foreground">C2 FRAMEWORK</label><div className="relative"><select value={iacConfig.c2Framework} onChange={e => setIacConfig(p => ({...p, c2Framework: e.target.value as C2Framework}))} className={baseSelectStyles}>{Object.values(C2Framework).map(f => <option key={f} value={f}>{f}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div><div><label className="text-xs font-bold text-muted-foreground">VM SIZE</label><div className="relative"><select value={iacConfig.c2VmSize} disabled={iacConfig.c2Framework === C2Framework.IMPERIUM} onChange={e => setIacConfig(p => ({...p, c2VmSize: e.target.value as VmSize}))} className={baseSelectStyles}>{Object.values(VmSize).map(s => <option key={s} value={s}>{s}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div></div>{iacConfig.c2Framework === C2Framework.IMPERIUM && <p className="text-xs text-accent-orange p-2 bg-accent-orange/10 rounded-md">The C2 server will be this platform. Only redirector infrastructure will be deployed.</p>}</fieldset>
-                                        <fieldset className="p-4 border border-border rounded-lg space-y-4 bg-input/30"><legend className="px-2 font-bold text-accent-orange">Edge Redirectors</legend><div className="space-y-4"><h4 className="font-bold flex items-center gap-2"><input type="checkbox" checked={iacConfig.enableEdgeHttp} onChange={e => setIacConfig(p => ({...p, enableEdgeHttp: e.target.checked}))} className="accent-primary w-4 h-4"/>HTTP/S</h4>{iacConfig.enableEdgeHttp && <div className="space-y-4 pl-6"><div className="grid grid-cols-2 gap-4"><div><label className="text-xs font-bold text-muted-foreground">REVERSE PROXY</label><div className="relative"><select value={iacConfig.edgeHttpProxy} onChange={e => setIacConfig(p => ({...p, edgeHttpProxy: e.target.value as ReverseProxy}))} className={baseSelectStyles}>{Object.values(ReverseProxy).map(p => <option key={p}>{p}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div><div><label className="text-xs font-bold text-muted-foreground">SSL/TLS</label><div className="relative"><select value={iacConfig.edgeHttpSsl} onChange={e => setIacConfig(p => ({...p, edgeHttpSsl: e.target.value}))} className={baseSelectStyles}><option>Let's Encrypt</option><option>Self-Signed</option></select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div></div><div><label className="text-xs font-bold text-muted-foreground">REDIRECT NON-C2 TRAFFIC TO</label><input type="text" value={iacConfig.edgeHttpRedirectUrl} onChange={e => setIacConfig(p => ({...p, edgeHttpRedirectUrl: e.target.value}))} className={baseInputStyles} /></div></div>}</div><div className="space-y-4 border-t border-border pt-4"><h4 className="font-bold flex items-center gap-2"><input type="checkbox" checked={iacConfig.enableEdgeDns} onChange={e => setIacConfig(p => ({...p, enableEdgeDns: e.target.checked}))} className="accent-primary w-4 h-4"/>DNS</h4></div></fieldset>
-                                    </div>
-                                    <div className="space-y-6">
-                                        <fieldset className="p-4 border border-border rounded-lg space-y-4 bg-input/30"><legend className="px-2 font-bold text-accent-purple">Secure Overlay Network</legend><h4 className="font-bold flex items-center gap-2"><input type="checkbox" checked={iacConfig.enableOverlay} onChange={e => setIacConfig(p => ({...p, enableOverlay: e.target.checked}))} className="accent-primary w-4 h-4"/>Enable Overlay</h4>{iacConfig.enableOverlay && <div className="space-y-4 pl-6"><div className="grid grid-cols-2 gap-4"><div><label className="text-xs font-bold text-muted-foreground">SOFTWARE</label><div className="relative"><select value={iacConfig.overlaySoftware} onChange={e => setIacConfig(p => ({...p, overlaySoftware: e.target.value as OverlaySoftware}))} className={baseSelectStyles}>{Object.values(OverlaySoftware).map(s => <option key={s}>{s}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div><div><label className="text-xs font-bold text-muted-foreground">LIGHTHOUSE VM</label><div className="relative"><select value={iacConfig.lighthouseVmSize} onChange={e => setIacConfig(p => ({...p, lighthouseVmSize: e.target.value as VmSize}))} className={baseSelectStyles}>{Object.values(VmSize).map(s => <option key={s}>{s}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div></div></div>}</fieldset>
-                                        <fieldset className="p-4 border border-border rounded-lg space-y-4 bg-input/30"><legend className="px-2 font-bold text-accent-purple">Internal Redirectors</legend><div className="space-y-4"><h4 className="font-bold flex items-center gap-2"><input type="checkbox" checked={iacConfig.enableInternalHttp} onChange={e => setIacConfig(p => ({...p, enableInternalHttp: e.target.checked}))} className="accent-primary w-4 h-4"/>HTTP/S</h4>{iacConfig.enableInternalHttp && <div className="space-y-4 pl-6"><div><label className="text-xs font-bold text-muted-foreground">FORWARDING METHOD</label><div className="relative"><select value={iacConfig.internalHttpForwarder} onChange={e => setIacConfig(p => ({...p, internalHttpForwarder: e.target.value as ForwardingMethod}))} className={baseSelectStyles}>{Object.values(ForwardingMethod).map(m => <option key={m}>{m}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div></div>}</div><div className="space-y-4 border-t border-border pt-4"><h4 className="font-bold flex items-center gap-2"><input type="checkbox" checked={iacConfig.enableInternalDns} onChange={e => setIacConfig(p => ({...p, enableInternalDns: e.target.checked}))} className="accent-primary w-4 h-4"/>DNS</h4>{iacConfig.enableInternalDns && <div className="space-y-4 pl-6"><div><label className="text-xs font-bold text-muted-foreground">FORWARDING METHOD</label><div className="relative"><select value={iacConfig.internalDnsForwarder} onChange={e => setIacConfig(p => ({...p, internalDnsForwarder: e.target.value as ForwardingMethod}))} className={baseSelectStyles}>{Object.values(ForwardingMethod).map(m => <option key={m}>{m}</option>)}</select><ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/></div></div></div>}</div></fieldset>
-                                    </div>
-                                </div>
-                                <div className="pt-4"><button onClick={handlePrepareIacPlan} className={primaryButtonStyles}><SparklesIcon className="w-4 h-4 mr-2" />Prepare IaC Generation Plan</button></div>
-                            </div>
-                        </div>
-                    </div>
                 )}
                 {activeView === 'DEFEND' && (
                     <div className="bg-black/30 border border-border rounded-lg flex flex-col h-full">
@@ -3326,10 +2784,8 @@ export default function App() {
                                                     platformLLMConfig: { provider: LLMProvider.GOOGLE, model: 'gemini-2.5-flash' },
                                                     granularLLMConfig: {},
                                                     permissions: {
-                                                        c2Access: false,
                                                         reconAccess: true,
                                                         attackPlanningAccess: false,
-                                                        agentBuilderAccess: false,
                                                         scriptEngineAccess: { enabled: false, allowedAttackTypes: [] },
                                                         userManagementAccess: false,
                                                         settingsAccess: false,
@@ -3349,7 +2805,6 @@ export default function App() {
                                                         <td className="p-3 font-semibold">{u.name}</td>
                                                         <td className="p-3"><span className={`px-2 py-1 rounded-full text-xs font-bold ${u.role === UserRole.SUPER_ADMIN ? 'bg-purple-500/20 text-purple-400' : u.role === UserRole.ADMIN ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'}`}>{u.role}</span></td>
                                                         <td className="p-3 text-xs text-muted-foreground">
-                                                            {u.permissions.c2Access && <span className="mr-2">C2</span>}
                                                             {u.permissions.reconAccess && <span className="mr-2">Recon</span>}
                                                             {u.permissions.scriptEngineAccess.enabled && <span className="mr-2">Scripting</span>}
                                                         </td>

@@ -5,7 +5,6 @@ import cors from 'cors';
 import { createServer } from 'http';
 import apiRouter from './routes/index.js';
 import { initSocket } from './socket.js';
-import { listenerManager } from './services/listenerManager.js';
 
 console.log('All initial imports successful');
 
@@ -26,11 +25,9 @@ app.use(express.json());
 app.use('/api/v1', apiRouter);
 
 app.get('/', (req: Request, res: Response) => {
-  res.send('Imperium C2 Backend Server is running');
+  res.send('Imperium Backend Server is running');
 });
 
 httpServer.listen(port, () => {
   console.log(`[server]: Server is running at http://localhost:${port}`);
-  // Start listeners
-  listenerManager.startAll();
 });
