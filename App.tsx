@@ -58,9 +58,10 @@ const OUTPUT_FORMATS: { [key: string]: string } = {
     csharp: "C#",
 };
 
-const AVAILABLE_MODELS: Record<LLMProvider, string[]> = {
-    [LLMProvider.GOOGLE]: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-latest"],
-    [LLMProvider.ANTHROPIC]: ["claude-sonnet-4-20250514", "claude-opus-4-5-20251101"],
+const AVAILABLE_MODELS: Record<string, string[]> = {
+    [LLMProvider.GOOGLE]: [],
+    [LLMProvider.ANTHROPIC]: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+    [LLMProvider.CUSTOM]: [], // Populated dynamically from custom config
 };
 
 type View = 'DASHBOARD' | 'ATTACK_PLAN' | 'RECON' | 'WEAPONIZATION' | 'CHAINER' | 'SHELLCODE' | 'LISTENERS' | 'AGENTS' | 'LOOT' | 'REPORTING' | 'AGENT_BUILDER' | 'EVENT_LOG' | 'SETTINGS' | 'DEFEND' | 'OFFENSIVE_INFRA' | 'REDIRECTORS';
@@ -370,7 +371,7 @@ const MOCK_USERS: User[] = [
         id: 'user-super',
         name: 'Ghost',
         role: UserRole.SUPER_ADMIN,
-        platformLLMConfig: { provider: LLMProvider.GOOGLE, model: 'gemini-2.5-pro' },
+        platformLLMConfig: { provider: LLMProvider.ANTHROPIC, model: 'claude-opus-4-7' },
         granularLLMConfig: {},
         permissions: {
             c2Access: true,
@@ -386,7 +387,7 @@ const MOCK_USERS: User[] = [
         id: 'user-admin',
         name: 'Spectre',
         role: UserRole.ADMIN,
-        platformLLMConfig: { provider: LLMProvider.GOOGLE, model: 'gemini-2.5-pro' },
+        platformLLMConfig: { provider: LLMProvider.ANTHROPIC, model: 'claude-opus-4-7' },
         granularLLMConfig: {},
         permissions: {
             c2Access: true,
@@ -402,9 +403,9 @@ const MOCK_USERS: User[] = [
         id: 'user-basic',
         name: 'Shadow',
         role: UserRole.USER,
-        platformLLMConfig: { provider: LLMProvider.GOOGLE, model: 'gemini-2.5-flash' },
+        platformLLMConfig: { provider: LLMProvider.ANTHROPIC, model: 'claude-sonnet-4-6' },
         granularLLMConfig: {
-            [AttackType.DATA_EXFILTRATION]: { provider: LLMProvider.GOOGLE, model: 'gemini-2.5-pro' }
+            [AttackType.DATA_EXFILTRATION]: { provider: LLMProvider.ANTHROPIC, model: 'claude-opus-4-7' }
         },
         permissions: {
             c2Access: false,
@@ -547,6 +548,13 @@ export default function App() {
     const [defendTab, setDefendTab] = useState<DefendTab>('PLANNER');
     const [settingsTab, setSettingsTab] = useState<SettingsTab>('PROFILE');
 
+    // Custom LLM configuration state
+    const [customLLMEndpoint, setCustomLLMEndpoint] = useState('');
+    const [customLLMModelName, setCustomLLMModelName] = useState('');
+    const [customLLMApiKey, setCustomLLMApiKey] = useState('');
+    const [customLLMConfigured, setCustomLLMConfigured] = useState(false);
+    const [customLLMTestResult, setCustomLLMTestResult] = useState<{success: boolean, message: string} | null>(null);
+    const [customLLMTesting, setCustomLLMTesting] = useState(false);
 
     const [command, setCommand] = useState('');
     const [osintTarget, setOsintTarget] = useState('');
@@ -756,7 +764,7 @@ export default function App() {
     const [lootFilter, setLootFilter] = useState({ agentId: '', type: '' });
     const [generatedReport, setGeneratedReport] = useState('');
     const [platformSettings, setPlatformSettings] = useState({
-        defaultLLM: { provider: LLMProvider.GOOGLE, model: 'gemini-2.5-flash' },
+        defaultLLM: { provider: LLMProvider.ANTHROPIC, model: 'claude-sonnet-4-6' },
         sessionTimeoutMinutes: 60,
         logRetentionDays: 90,
         disabledAttackTypes: [AttackType.DATA_EXFILTRATION as AttackType],
@@ -820,10 +828,106 @@ export default function App() {
         }, 3000);
     };
 
+    // --- Custom LLM Config Helpers ---
+    const customLLMApiBase = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api/v1/ai');
+
+    const loadCustomLLMConfig = useCallback(async () => {
+        try {
+            const res = await fetch(`${customLLMApiBase}/custom-llm/config`);
+            const data = await res.json();
+            if (data.configured) {
+                setCustomLLMEndpoint(data.apiEndpoint);
+                setCustomLLMModelName(data.modelName);
+                setCustomLLMConfigured(true);
+                setCustomLLMApiKey(''); // Don't load key back
+            }
+        } catch (e) {
+            console.error('Failed to load custom LLM config:', e);
+        }
+    }, [customLLMApiBase]);
+
+    const saveCustomLLMConfig = useCallback(async () => {
+        if (!customLLMEndpoint || !customLLMModelName) {
+            showToast('API Endpoint and Model Name are required.', 'error');
+            return;
+        }
+        try {
+            const res = await fetch(`${customLLMApiBase}/custom-llm/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    apiEndpoint: customLLMEndpoint,
+                    apiKey: customLLMApiKey,
+                    modelName: customLLMModelName,
+                }),
+            });
+            const data = await res.json();
+            if (data.success) {
+                setCustomLLMConfigured(true);
+                showToast('Custom LLM configuration saved.');
+                setCustomLLMTestResult(null);
+            } else {
+                showToast('Failed to save configuration.', 'error');
+            }
+        } catch (e) {
+            showToast('Failed to save custom LLM configuration.', 'error');
+        }
+    }, [customLLMEndpoint, customLLMApiKey, customLLMModelName, customLLMApiBase, showToast]);
+
+    const testCustomLLMConnection = useCallback(async () => {
+        if (!customLLMEndpoint || !customLLMModelName) {
+            showToast('API Endpoint and Model Name are required.', 'error');
+            return;
+        }
+        setCustomLLMTesting(true);
+        setCustomLLMTestResult(null);
+        try {
+            const res = await fetch(`${customLLMApiBase}/custom-llm/test`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    apiEndpoint: customLLMEndpoint,
+                    apiKey: customLLMApiKey,
+                    modelName: customLLMModelName,
+                }),
+            });
+            const data = await res.json();
+            setCustomLLMTestResult({
+                success: data.success,
+                message: data.success ? `Connected! Response: ${data.response}` : `Failed: ${data.error}`,
+            });
+        } catch (e: any) {
+            setCustomLLMTestResult({ success: false, message: `Connection error: ${e.message}` });
+        } finally {
+            setCustomLLMTesting(false);
+        }
+    }, [customLLMEndpoint, customLLMApiKey, customLLMModelName, customLLMApiBase]);
+
+    const deleteCustomLLMConfig = useCallback(async () => {
+        try {
+            await fetch(`${customLLMApiBase}/custom-llm/config`, { method: 'DELETE' });
+            setCustomLLMEndpoint('');
+            setCustomLLMModelName('');
+            setCustomLLMApiKey('');
+            setCustomLLMConfigured(false);
+            setCustomLLMTestResult(null);
+            // Reset to Anthropic if currently set to Custom
+            setCurrentUser(p => {
+                if (p.platformLLMConfig.provider === LLMProvider.CUSTOM) {
+                    return { ...p, platformLLMConfig: { provider: LLMProvider.ANTHROPIC, model: 'claude-sonnet-4-6' } };
+                }
+                return p;
+            });
+            showToast('Custom LLM configuration removed.');
+        } catch (e) {
+            showToast('Failed to remove custom LLM configuration.', 'error');
+        }
+    }, [customLLMApiBase, showToast]);
+
     const toggleDropdown = (name: string) => {
       setOpenDropdown(prev => prev === name ? null : name);
     };
-    
+
     // --- Data Fetching from C2 Service ---
     const refreshListeners = useCallback(() => c2Service.getListeners().then(setListeners), []);
     const refreshAgents = useCallback(() => c2Service.getAgents().then(setAgents), []);
@@ -836,6 +940,10 @@ export default function App() {
         });
     }, []);
     const refreshSiemRules = useCallback(() => c2Service.getSiemRules().then(setSiemRules), []);
+
+    useEffect(() => {
+        loadCustomLLMConfig();
+    }, [loadCustomLLMConfig]);
 
     useEffect(() => {
         refreshListeners();
@@ -957,9 +1065,14 @@ export default function App() {
     };
 
     const getModelForTask = useCallback((attackType?: AttackType): string => {
-        if (!currentUser) return 'gemini-2.5-pro'; // Fallback
+        if (!currentUser) return 'claude-sonnet-4-6'; // Fallback
         if (attackType && currentUser.granularLLMConfig[attackType]) {
-            return currentUser.granularLLMConfig[attackType]!.model;
+            const config = currentUser.granularLLMConfig[attackType]!;
+            if (config.provider === LLMProvider.CUSTOM) return `custom:${config.model}`;
+            return config.model;
+        }
+        if (currentUser.platformLLMConfig.provider === LLMProvider.CUSTOM) {
+            return `custom:${currentUser.platformLLMConfig.model}`;
         }
         return currentUser.platformLLMConfig.model;
     }, [currentUser]);
@@ -3052,7 +3165,22 @@ export default function App() {
                                                 <div>
                                                     <label className="text-xs font-bold text-muted-foreground">PROVIDER</label>
                                                     <div className="relative">
-                                                        <select value={currentUser.platformLLMConfig.provider} onChange={e => setCurrentUser(p => ({...p, platformLLMConfig: {...p.platformLLMConfig, provider: e.target.value as LLMProvider}}))} className={baseSelectStyles}>
+                                                        <select value={currentUser.platformLLMConfig.provider} onChange={e => {
+                                                            const newProvider = e.target.value as LLMProvider;
+                                                            setCurrentUser(p => {
+                                                                const models = newProvider === LLMProvider.CUSTOM
+                                                                    ? (customLLMConfigured ? [customLLMModelName] : [])
+                                                                    : AVAILABLE_MODELS[newProvider];
+                                                                return {
+                                                                    ...p,
+                                                                    platformLLMConfig: {
+                                                                        ...p.platformLLMConfig,
+                                                                        provider: newProvider,
+                                                                        model: models[0] || '',
+                                                                    }
+                                                                };
+                                                            });
+                                                        }} className={baseSelectStyles}>
                                                             {Object.values(LLMProvider).map(p => <option key={p}>{p}</option>)}
                                                         </select>
                                                         <ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/>
@@ -3060,16 +3188,90 @@ export default function App() {
                                                 </div>
                                                 <div>
                                                     <label className="text-xs font-bold text-muted-foreground">MODEL</label>
-                                                    <div className="relative">
-                                                        <select value={currentUser.platformLLMConfig.model} onChange={e => setCurrentUser(p => ({...p, platformLLMConfig: {...p.platformLLMConfig, model: e.target.value}}))} className={baseSelectStyles}>
-                                                            {AVAILABLE_MODELS[currentUser.platformLLMConfig.provider].map(m => <option key={m}>{m}</option>)}
-                                                        </select>
-                                                        <ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/>
-                                                    </div>
+                                                    {currentUser.platformLLMConfig.provider === LLMProvider.CUSTOM ? (
+                                                        <input
+                                                            type="text"
+                                                            value={customLLMConfigured ? customLLMModelName : 'Not configured'}
+                                                            disabled
+                                                            className={`${baseInputStyles} opacity-70 cursor-not-allowed`}
+                                                        />
+                                                    ) : (
+                                                        <div className="relative">
+                                                            <select value={currentUser.platformLLMConfig.model} onChange={e => setCurrentUser(p => ({...p, platformLLMConfig: {...p.platformLLMConfig, model: e.target.value}}))} className={baseSelectStyles}>
+                                                                {(AVAILABLE_MODELS[currentUser.platformLLMConfig.provider] || []).map(m => <option key={m}>{m}</option>)}
+                                                            </select>
+                                                            <ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"/>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
+                                            {currentUser.platformLLMConfig.provider === LLMProvider.CUSTOM && !customLLMConfigured && (
+                                                <p className="text-xs text-yellow-400 mt-2">Configure your custom LLM endpoint below before using this provider.</p>
+                                            )}
                                         </div>
-                                        
+
+                                        {/* Custom LLM Configuration */}
+                                        <div>
+                                            <h3 className="text-lg font-bold text-primary border-b border-border pb-2 mb-4">Custom LLM Endpoint</h3>
+                                            <p className="text-sm text-muted-foreground mb-4">Connect any OpenAI-compatible API (Ollama, LM Studio, vLLM, OpenRouter, Groq, Together AI, etc.)</p>
+                                            <div className="space-y-4">
+                                                <div>
+                                                    <label className="text-xs font-bold text-muted-foreground">API ENDPOINT</label>
+                                                    <input
+                                                        type="text"
+                                                        value={customLLMEndpoint}
+                                                        onChange={e => setCustomLLMEndpoint(e.target.value)}
+                                                        placeholder="e.g. http://localhost:11434 or https://api.openrouter.ai/api"
+                                                        className={baseInputStyles}
+                                                    />
+                                                    <p className="text-xs text-muted-foreground mt-1">The base URL of the API. /v1/chat/completions will be appended automatically if needed.</p>
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs font-bold text-muted-foreground">MODEL NAME</label>
+                                                    <input
+                                                        type="text"
+                                                        value={customLLMModelName}
+                                                        onChange={e => setCustomLLMModelName(e.target.value)}
+                                                        placeholder="e.g. llama3, mistral, deepseek-coder, gpt-4o"
+                                                        className={baseInputStyles}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs font-bold text-muted-foreground">API KEY (optional for local models)</label>
+                                                    <input
+                                                        type="password"
+                                                        value={customLLMApiKey}
+                                                        onChange={e => setCustomLLMApiKey(e.target.value)}
+                                                        placeholder="sk-... or leave empty for local APIs"
+                                                        className={baseInputStyles}
+                                                    />
+                                                </div>
+                                                <div className="flex gap-3">
+                                                    <button onClick={saveCustomLLMConfig} className={primaryButtonStyles}>
+                                                        Save Configuration
+                                                    </button>
+                                                    <button onClick={testCustomLLMConnection} disabled={customLLMTesting} className={`${baseInputStyles} px-4 py-2 cursor-pointer hover:bg-border transition-colors ${customLLMTesting ? 'opacity-50' : ''}`}>
+                                                        {customLLMTesting ? 'Testing...' : 'Test Connection'}
+                                                    </button>
+                                                    {customLLMConfigured && (
+                                                        <button onClick={deleteCustomLLMConfig} className={`${baseInputStyles} px-4 py-2 cursor-pointer hover:bg-red-900/30 text-red-400 transition-colors`}>
+                                                            Remove
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                {customLLMTestResult && (
+                                                    <div className={`p-3 rounded-md text-sm ${customLLMTestResult.success ? 'bg-green-900/20 border border-green-800 text-green-400' : 'bg-red-900/20 border border-red-800 text-red-400'}`}>
+                                                        {customLLMTestResult.message}
+                                                    </div>
+                                                )}
+                                                {customLLMConfigured && (
+                                                    <div className="p-3 rounded-md bg-green-900/10 border border-green-900/30 text-green-400 text-sm">
+                                                        Custom LLM configured: <span className="font-mono font-bold">{customLLMModelName}</span> at <span className="font-mono">{customLLMEndpoint}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
                                         <div>
                                             <h3 className="text-lg font-bold text-primary border-b border-border pb-2 mb-4">Granular Control (Advanced)</h3>
                                             <p className="text-sm text-muted-foreground mb-4">Override the default model for specific attack types.</p>
@@ -3078,24 +3280,30 @@ export default function App() {
                                                     <div key={type} className="flex items-center gap-4 p-3 bg-input border border-border rounded-md">
                                                         <span className="text-sm font-semibold flex-1">{type}</span>
                                                         <div className="relative w-48">
-                                                            <select 
-                                                                value={currentUser.granularLLMConfig[type]?.model || ''} 
+                                                            <select
+                                                                value={currentUser.granularLLMConfig[type]?.provider === LLMProvider.CUSTOM ? '__custom__' : (currentUser.granularLLMConfig[type]?.model || '')}
                                                                 onChange={e => {
                                                                     const val = e.target.value;
                                                                     setCurrentUser(p => {
                                                                         const newConfig = {...p.granularLLMConfig};
                                                                         if (val === '') {
                                                                             delete newConfig[type];
+                                                                        } else if (val === '__custom__') {
+                                                                            newConfig[type] = { provider: LLMProvider.CUSTOM, model: customLLMModelName };
                                                                         } else {
-                                                                            newConfig[type] = { provider: LLMProvider.GOOGLE, model: val };
+                                                                            // Detect provider from model name
+                                                                            const provider = val.startsWith('claude') ? LLMProvider.ANTHROPIC : LLMProvider.GOOGLE;
+                                                                            newConfig[type] = { provider, model: val };
                                                                         }
                                                                         return {...p, granularLLMConfig: newConfig};
                                                                     })
-                                                                }} 
+                                                                }}
                                                                 className={`${baseSelectStyles} py-1 text-xs`}
                                                             >
                                                                 <option value="">Default</option>
                                                                 {AVAILABLE_MODELS[LLMProvider.GOOGLE].map(m => <option key={m} value={m}>{m}</option>)}
+                                                                {AVAILABLE_MODELS[LLMProvider.ANTHROPIC].map(m => <option key={m} value={m}>{m}</option>)}
+                                                                {customLLMConfigured && <option value="__custom__">Custom: {customLLMModelName}</option>}
                                                             </select>
                                                             <ChevronDownIcon className="absolute right-3 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none"/>
                                                         </div>

@@ -4,7 +4,14 @@
       "Bash(dir \"C:\\\\Users\\\\d8rh8r\\\\imperium\\\\backend\\\\src\")",
       "Bash(dir:*)",
       "Bash(npm install:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(xargs grep:*)",
+      "Bash(node:*)",
+      "Bash(printf:*)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "imperium"
+  ],
+  "enableAllProjectMcpServers": true
 }

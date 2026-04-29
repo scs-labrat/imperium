@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { Tool as GeminiTool, FunctionDeclaration, SchemaType } from "@google/generative-ai";
+import { FunctionDeclaration, SchemaType } from "@google/generative-ai";
+import { ToolDeclaration } from "./llm/ILLMProvider.js";
 
 // Global client instance
 let mcpClient: Client | null = null;
@@ -81,6 +82,28 @@ export const getMcpToolsAsGemini = async (): Promise<FunctionDeclaration[]> => {
             parameters: geminiParameters
         };
     });
+};
+
+/**
+ * Lists available tools from the connected MCP server in the generic ToolDeclaration format
+ * compatible with any ILLMProvider (Anthropic, etc.).
+ */
+export const getMcpTools = async (): Promise<ToolDeclaration[]> => {
+    if (!mcpClient) {
+        throw new Error("MCP Client not connected.");
+    }
+
+    const result = await mcpClient.listTools();
+
+    return result.tools.map(tool => ({
+        name: tool.name,
+        description: tool.description || "",
+        parameters: {
+            type: "object",
+            properties: tool.inputSchema.properties || {},
+            required: tool.inputSchema.required || []
+        }
+    }));
 };
 
 /**

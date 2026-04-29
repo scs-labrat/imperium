@@ -132,12 +132,14 @@ export enum UserRole {
 export enum LLMProvider {
     GOOGLE = "Google",
     ANTHROPIC = "Anthropic",
+    CUSTOM = "Custom",
 }
 
 export interface LLMConfig {
     provider: LLMProvider;
     model: string;
-    apiKey?: string; // Stored securely on backend, not sent from frontend
+    apiKey?: string;
+    apiEndpoint?: string; // For custom LLM providers (OpenAI-compatible endpoint)
 }
 
 export type GranularLLMConfig = Partial<Record<AttackType, LLMConfig>>;

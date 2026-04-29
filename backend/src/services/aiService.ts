@@ -1,21 +1,9 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { PrismaClient } from "@prisma/client";
 import { GenerationParams, CodeLanguage, ObfuscationTechnique, AttackType, TargetOS, VaultItem, TargetEnvironment, ShellcodeParams, SiemConfig, DetectIQOutput, LLMProvider } from '../types/index.js';
 import * as mcpService from './mcpService.js';
 import { getProviderFromModel, getProvider, ILLMProvider } from './llm/index.js';
 
-let ai: GoogleGenerativeAI;
 const prisma = new PrismaClient();
-
-// Legacy initialization for backwards compatibility
-const initializeAi = () => {
-    if (!process.env.API_KEY) {
-        throw new Error("API_KEY environment variable not set");
-    }
-    if (!ai) {
-        ai = new GoogleGenerativeAI(process.env.API_KEY);
-    }
-};
 
 // Get provider based on model name (auto-detect Gemini vs Claude)
 const getAiProvider = (modelName: string): ILLMProvider => {
@@ -413,15 +401,10 @@ export const performOsintAnalysis = async (target: string, modelName: string): P
     }
 };
 
-import * as mcpService from './mcpService.js';
-
 export const performAdvancedOsintAnalysis = async (target: string, modelName: string): Promise<string> => {
-    await initializeAi();
-
     let command = 'npx';
     let args = ['ts-node', 'src/mcp-osint-server.ts'];
 
-    // Fetch config from DB
     try {
         const config = await prisma.mcpConfig.findUnique({ where: { id: 'default' } });
         if (config && config.enabled) {
@@ -432,61 +415,48 @@ export const performAdvancedOsintAnalysis = async (target: string, modelName: st
         console.warn("Failed to load custom MCP config, using default:", e);
     }
 
-    // 1. Connect to the real MCP Server
     try {
         await mcpService.connectToMcpServer(command, args);
     } catch (e) {
-        console.warn("MCP Server connection failed, falling back or aborting:", e);
+        console.warn("MCP Server connection failed:", e);
         return "### Error: Could not connect to OSINT Tools Provider.";
     }
-    
-    // 2. Fetch Real Tools
-    const realTools = await mcpService.getMcpToolsAsGemini();
 
-    const model = ai.getGenerativeModel({ 
-        model: modelName,
-        tools: [{ functionDeclarations: realTools }] 
-    });
+    const tools = await mcpService.getMcpTools();
+    const provider = getProviderFromModel(modelName);
 
-    const chat = model.startChat();
+    if (!provider.startChat) {
+        return "### Error: Selected model does not support tool-use chat sessions.";
+    }
+
+    const chat = provider.startChat(tools);
 
     const prompt = `
       **Activation Code: MCP-THETA-7**
       You are the Master Control Program (MCP). You have access to REAL external OSINT tools provided by a specialized server.
-      
+
       **Target:** ${target}
 
       **Directive:**
       1.  Use the available tools to gather real-time intelligence on the target.
       2.  Analyze the tool outputs.
       3.  Generate a "Deep-Level OSINT Report" summarizing your findings.
-      
+
       Begin by calling the necessary tools.
     `;
 
     try {
-        let result = await chat.sendMessage(prompt);
-        let response = result.response;
-        let functionCalls = response.functionCalls();
+        let response = await chat.sendMessage(prompt);
+        let toolCalls = response.functionCalls();
 
-        // Loop to handle multiple tool calls
-        while (functionCalls && functionCalls.length > 0) {
-            const parts: any[] = [];
-            for (const call of functionCalls) {
-                // Call the REAL tool via MCP
-                const toolResult = await mcpService.callMcpTool(call.name, call.args);
-                
-                parts.push({
-                    functionResponse: {
-                        name: call.name,
-                        response: { result: toolResult }
-                    }
-                });
+        while (toolCalls && toolCalls.length > 0) {
+            const toolResults: Array<{ name: string; result: any }> = [];
+            for (const call of toolCalls) {
+                const result = await mcpService.callMcpTool(call.name, call.args);
+                toolResults.push({ name: call.name, result });
             }
-            // Send tool results back to the model
-            result = await chat.sendMessage(parts);
-            response = result.response;
-            functionCalls = response.functionCalls();
+            response = await chat.sendMessageWithToolResults(toolResults);
+            toolCalls = response.functionCalls();
         }
 
         return response.text();

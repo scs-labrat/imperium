@@ -1,8 +1,14 @@
 
 import { Router } from 'express';
-import { generateCode, generateThreatHuntCode, generateLoader, refineCode, chainPayloads, generateShellcode, obfuscateCode, analyzeExecutionLog, analyzeThreatHuntLog, performOsintAnalysis, performAdvancedOsintAnalysis, analyzeVulnerabilityScan, simulateCode, planMission, applyAnalysisRecommendations, planDefenceMission, generateValidationPlan, generateDetectionRule, optimizeDetectionRule, explainDetectionRule, generateIrPlan, generateIrTabletopScenario, convertKqlToDsl, analyzeSiemResponse } from '../controllers/aiController.js';
+import { generateCode, generateThreatHuntCode, generateLoader, refineCode, chainPayloads, generateShellcode, obfuscateCode, analyzeExecutionLog, analyzeThreatHuntLog, performOsintAnalysis, performAdvancedOsintAnalysis, analyzeVulnerabilityScan, simulateCode, planMission, applyAnalysisRecommendations, planDefenceMission, generateValidationPlan, generateDetectionRule, optimizeDetectionRule, explainDetectionRule, generateIrPlan, generateIrTabletopScenario, convertKqlToDsl, analyzeSiemResponse, saveCustomLLMConfig, getCustomLLMConfigRoute, deleteCustomLLMConfig, testCustomLLMConfig } from '../controllers/aiController.js';
 
 const router = Router();
+
+// Custom LLM configuration routes
+router.post('/custom-llm/config', saveCustomLLMConfig);
+router.get('/custom-llm/config', getCustomLLMConfigRoute);
+router.delete('/custom-llm/config', deleteCustomLLMConfig);
+router.post('/custom-llm/test', testCustomLLMConfig);
 
 router.post('/generate', generateCode);
 router.post('/generate-threat-hunt-code', generateThreatHuntCode);

@@ -1,5 +1,75 @@
 import { Request, Response } from 'express';
 import * as aiService from '../services/aiService.js';
+import { setCustomLLMConfig, getCustomLLMConfig } from '../services/llm/index.js';
+
+export const saveCustomLLMConfig = async (req: Request, res: Response) => {
+    try {
+        const { apiEndpoint, apiKey, modelName } = req.body;
+        if (!apiEndpoint || !modelName) {
+            res.status(400).json({ message: 'apiEndpoint and modelName are required' });
+            return;
+        }
+        setCustomLLMConfig({ apiEndpoint, apiKey: apiKey || '', modelName });
+        res.json({ success: true, message: 'Custom LLM configuration saved' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error saving custom LLM config' });
+    }
+};
+
+export const getCustomLLMConfigRoute = async (_req: Request, res: Response) => {
+    try {
+        const config = getCustomLLMConfig();
+        if (!config) {
+            res.json({ configured: false });
+            return;
+        }
+        // Don't send full API key back - mask it
+        res.json({
+            configured: true,
+            apiEndpoint: config.apiEndpoint,
+            modelName: config.modelName,
+            apiKeySet: !!config.apiKey,
+            apiKeyPreview: config.apiKey ? `${config.apiKey.substring(0, 8)}...` : '',
+        });
+    } catch (error) {
+        res.status(500).json({ message: 'Error getting custom LLM config' });
+    }
+};
+
+export const deleteCustomLLMConfig = async (_req: Request, res: Response) => {
+    try {
+        setCustomLLMConfig(null);
+        res.json({ success: true, message: 'Custom LLM configuration removed' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error deleting custom LLM config' });
+    }
+};
+
+export const testCustomLLMConfig = async (req: Request, res: Response) => {
+    try {
+        const { apiEndpoint, apiKey, modelName } = req.body;
+        if (!apiEndpoint || !modelName) {
+            res.status(400).json({ message: 'apiEndpoint and modelName are required' });
+            return;
+        }
+        // Temporarily set config, test, then restore previous
+        const previousConfig = getCustomLLMConfig();
+        setCustomLLMConfig({ apiEndpoint, apiKey: apiKey || '', modelName });
+        try {
+            const { CustomProvider } = await import('../services/llm/CustomProvider.js');
+            const provider = new CustomProvider(apiKey || '', modelName, apiEndpoint);
+            const result = await provider.generateContent('Say "Connection successful!" in exactly those words.');
+            res.json({ success: true, response: result.substring(0, 200) });
+        } catch (testError: any) {
+            res.json({ success: false, error: testError.message });
+        } finally {
+            // Restore previous config if test was ad-hoc
+            setCustomLLMConfig(previousConfig);
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Error testing custom LLM config' });
+    }
+};
 
 export const generateCode = async (req: Request, res: Response) => {
     try {
